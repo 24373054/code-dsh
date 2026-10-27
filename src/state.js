@@ -89,22 +89,24 @@ export function cacheEvent(state, event) {
  * @param options.state - state container.
  * @param options.startedAt - ISO timestamp captured when the plugin applied.
  * @param options.health - health snapshot; control-plane mode probes the service.
+ * @param options.config - non-secret plugin configuration for display.
  * @param options.now - clock override for tests.
  * @returns a plain object matching the browser overview contract.
  */
-export function buildOverview({ mode, version, state, startedAt, health, now = new Date() }) {
+export function buildOverview({ mode, version, state, startedAt, health, config, now = new Date() }) {
   const container = state ?? createSandboxState()
   const events = Array.isArray(container.events) ? container.events : []
   const authoritative = mode === 'control-plane'
   const recent = events.slice(-RECENT_EVENT_LIMIT).reverse()
   return {
     plugin: {
-      name: '@00ccf/dsh-trust-platform',
+      name: '@sealwax/dsh-trust-platform',
       version: typeof version === 'string' && version !== '' ? version : '0.0.0',
       mode,
       source: authoritative ? 'control-plane' : 'in-memory-sandbox',
       authoritative,
       started_at: typeof startedAt === 'string' ? startedAt : null,
+      config: publicConfig(config),
     },
     health: normalizeHealth(health),
     counts: {
@@ -123,6 +125,26 @@ export function buildOverview({ mode, version, state, startedAt, health, now = n
       decision: event.decision ?? null,
     })),
     now: now instanceof Date ? now.toISOString() : String(now),
+  }
+}
+
+/**
+ * Reduce plugin configuration to display-safe fields.
+ *
+ * The bearer token is never included: the overview only reports whether one is
+ * configured, so the browser can render settings without holding a secret.
+ *
+ * @param config - non-secret settings supplied by `apply`.
+ * @returns display-safe configuration block.
+ */
+function publicConfig(config) {
+  const source = config !== null && typeof config === 'object' ? config : {}
+  return {
+    base_url: typeof source.baseUrl === 'string' ? source.baseUrl : '',
+    actor_did: typeof source.actorDid === 'string' ? source.actorDid : '',
+    timeout_ms: Number.isFinite(source.timeoutMs) ? source.timeoutMs : 0,
+    allow_intervention_execution: source.allowInterventionExecution === true,
+    token_configured: source.tokenConfigured === true,
   }
 }
 

@@ -2,7 +2,7 @@
 
 ![DSH Trust Platform overview panel in the plugin manager](preview.svg)
 
-Release 0.3.0 adds a browser half to `@00ccf/dsh-trust-platform`. The DSH Web GUI loads it lazily
+Release 0.3.0 adds a browser half to `@sealwax/dsh-trust-platform`. The DSH Web GUI loads it lazily
 from the prebuilt `lib/client.js` bundle: it renders the eight governed trust tools as compact cards
 in the conversation and adds an overview panel to the plugin's detail page. The browser half talks
 only to the DSH origin that served it.
@@ -15,7 +15,7 @@ only to the DSH origin that served it.
 | Settings → Plugins → DSH Trust Platform | `plugins.detail.section`, id `trust-platform-overview` | Overview panel: mode, source, authority, health, six counters, ten most recent events. |
 | Same plugin page | `plugins.detail.badge`, id `trust-platform-badge` | Version pill for the active trust-platform package. |
 
-Both plugin-manager entries match the package by name (`@00ccf/dsh-trust-platform`) — via the
+Both plugin-manager entries match the package by name (`@sealwax/dsh-trust-platform`) — via the
 package subject, the row name or a bare id — and return `null` for any other package, so they never
 draw chrome on unrelated plugin pages.
 

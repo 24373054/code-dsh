@@ -13,13 +13,13 @@ The plugin never sends money or settles value in either mode.
 ## Install
 
 ```sh
-npm install @00ccf/dsh-trust-platform
+npm install @sealwax/dsh-trust-platform
 ```
 
 The package declares `dsh.bundle.patch`, so `dsh plugin` composes it into a profile:
 
 ```sh
-dsh plugin --profile demo add @00ccf/dsh-trust-platform
+dsh plugin --profile demo add @sealwax/dsh-trust-platform
 dsh --profile demo --dump-config   # shows the trust-platform-tools row
 ```
 
@@ -92,7 +92,7 @@ With `allowInterventionExecution: true` the control-plane mode registers 37 tool
 
 ## Client export
 
-`@00ccf/dsh-trust-platform/control-plane-client` exports the fixed-route HTTP adapter used in
+`@sealwax/dsh-trust-platform/control-plane-client` exports the fixed-route HTTP adapter used in
 control-plane mode:
 `createControlPlaneClient`, `ROUTES`, `ControlPlaneError` and `validateBaseUrl`. It maps the service's
 flat error body (`error_code`, `message`, `request_id`, `retryable`, `evidence_refs`,
@@ -104,7 +104,8 @@ adapter from Node code now uses the explicit `./control-plane-client` subpath.
 
 ## Browser UI
 
-Version 0.3.0 adds the browser half that the DSH Web GUI loads lazily. Installation is unchanged: the
+Version 0.3.0 added the first browser half, and 0.4.0 completes it with a read-only settings page; the
+package now publishes as `@sealwax/dsh-trust-platform`. The DSH Web GUI loads the bundle lazily. Installation is unchanged: the
 package declares `dsh.client` (`platform: web`) and ships the prebuilt bundle at `lib/client.js`, so
 `dsh plugin add` activates it without a build step. The bundle is a lazy CommonJS factory
 (`window.__ModuleLoader__.load`) whose only bare imports are shell baseline modules (`react`,
@@ -125,6 +126,11 @@ The browser half provides:
   It polls the same-origin route `GET /trust-platform/api/overview` every 5 seconds while mounted and
   keeps the last good snapshot if a refresh fails.
 - **Package badge** showing the version of the active trust-platform package.
+- **Settings page** in Settings → Trust Platform: mode and authority badges, control-plane health, the
+  effective read-only configuration (`base_url`, `actor_did`, `timeout_ms`,
+  `allow_intervention_execution`, and whether a token is configured — never the token value), the six
+  entity counters, and a note naming the exact `cordis.patch.yml` config keys to edit. It polls the
+  overview route every 10 seconds and reuses the same localized error handling.
 
 The overview route is served by the plugin's host half and uses the GUI session; a `403`, `500` or
 network error is rendered as a localized, retryable message instead of a broken panel. The browser

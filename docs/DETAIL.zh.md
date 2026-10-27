@@ -2,7 +2,7 @@
 
 ![DSH 信任平台在插件管理页中的概览面板](preview.zh.svg)
 
-0.3.0 版本为 `@00ccf/dsh-trust-platform` 增加了浏览器端。DSH Web GUI 会从预构建的
+0.3.0 版本为 `@sealwax/dsh-trust-platform` 增加了浏览器端。DSH Web GUI 会从预构建的
 `lib/client.js` 中惰性加载它：在对话里把八个受治理的信任工具调用渲染为紧凑卡片，并在插件详情页
 增加一个概览面板。浏览器端只访问为其提供资源的 DSH 同源地址。
 
@@ -14,7 +14,7 @@
 | 设置 → 插件 → DSH 信任平台 | `plugins.detail.section`，id 为 `trust-platform-overview` | 概览面板：模式、来源、权威性、健康状态、六项计数、最近十条事件。 |
 | 同一插件页 | `plugins.detail.badge`，id 为 `trust-platform-badge` | 当前信任平台包的版本徽标。 |
 
-两个插件管理页条目都按包名（`@00ccf/dsh-trust-platform`）匹配——依次检查包 subject、行名与裸 id——
+两个插件管理页条目都按包名（`@sealwax/dsh-trust-platform`）匹配——依次检查包 subject、行名与裸 id——
 对其他任何包返回 `null`，因此不会在无关插件页面绘制界面。
 
 ## 工具卡片

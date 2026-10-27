@@ -14,147 +14,16 @@
  * localized error strip (or a stale-data warning when an earlier snapshot is
  * still on screen) instead of unmounting the section.
  */
-import { useCallback, useEffect, useState } from 'react'
 import { Badge } from './badge.jsx'
-import {
-  COUNT_KEYS,
-  decisionTone,
-  formatTime,
-  matchesPlugin,
-  normalizeOverviewBody,
-  translate
-} from './format.js'
+import { COUNT_KEYS, decisionTone, formatTime, matchesPlugin, translate } from './format.js'
+import { describeError, useOverview } from './overview-data.js'
 import * as styles from './styles.js'
-
-/** Same-origin Host route that joins the configured mode and the live stores. */
-const OVERVIEW_URL = '/trust-platform/api/overview'
 
 /** Poll cadence while the panel is mounted. */
 const POLL_INTERVAL_MS = 5000
 
 /** The host caps recent events itself; the client keeps the panel compact. */
 const MAX_RECENT_EVENTS = 10
-
-/** Describe an unreachable transport without assuming an Error instance. */
-function errorMessage(error) {
-  if (error && typeof error === 'object') {
-    if (typeof error.message === 'string' && error.message) return error.message
-    return String(error)
-  }
-  return String(error)
-}
-
-/**
- * Fetch one overview snapshot.
- *
- * @param {AbortSignal | undefined} signal
- * @returns {Promise<
- *   { data: Record<string, unknown> } |
- *   { aborted: true } |
- *   { error: { kind: 'unavailable' | 'forbidden' | 'invalid' | 'http' | 'network' | 'host', status?: number, code?: string, message?: string } }
- * >}
- */
-async function requestOverview(signal) {
-  if (typeof fetch !== 'function') return { error: { kind: 'unavailable' } }
-
-  let response
-  try {
-    response = await fetch(OVERVIEW_URL, {
-      credentials: 'same-origin',
-      headers: { accept: 'application/json' },
-      signal: signal || undefined
-    })
-  } catch (error) {
-    if (error && (error.name === 'AbortError' || error.code === 'ABORT_ERR')) return { aborted: true }
-    return { error: { kind: 'network', message: errorMessage(error) } }
-  }
-
-  if (response.status === 401 || response.status === 403) return { error: { kind: 'forbidden' } }
-  if (response.status === 404) return { error: { kind: 'unavailable' } }
-  if (!response.ok) return { error: { kind: 'http', status: response.status } }
-
-  let body
-  try {
-    body = await response.json()
-  } catch {
-    return { error: { kind: 'invalid' } }
-  }
-  if (!body || typeof body !== 'object' || Array.isArray(body) || body.ok !== true) {
-    return {
-      error: {
-        kind: 'host',
-        code: body && typeof body.error_code === 'string' ? body.error_code : 'UNKNOWN',
-        message: body && typeof body.message === 'string' ? body.message : ''
-      }
-    }
-  }
-  const overview = normalizeOverviewBody(body)
-  if (overview === null) return { error: { kind: 'invalid' } }
-  return { data: overview }
-}
-
-/** Localized one-line explanation for a failed request. */
-function describeError(error, t) {
-  switch (error.kind) {
-    case 'forbidden':
-      return translate(t, 'overview.error.forbidden')
-    case 'http':
-      return translate(t, 'overview.error.http', { status: error.status })
-    case 'network':
-      return translate(t, 'overview.error.network', { message: error.message })
-    case 'host':
-      return translate(t, 'overview.error.host', { code: error.code, message: error.message || '—' })
-    case 'unavailable':
-      return translate(t, 'overview.unavailable')
-    default:
-      return translate(t, 'overview.error.invalid')
-  }
-}
-
-/**
- * Overview state machine: load on mount, then poll; overlapped polls are
- * skipped, unmount aborts the in-flight request, and a failed refresh keeps the
- * last good snapshot.
- */
-function useOverview() {
-  const [state, setState] = useState({ data: null, error: null, loading: false, refreshedAt: 0 })
-  const [generation, setGeneration] = useState(0)
-  const reload = useCallback(() => setGeneration((value) => value + 1), [])
-
-  useEffect(() => {
-    let disposed = false
-    let inFlight = false
-    let controller = null
-
-    const load = () => {
-      if (disposed || inFlight) return
-      inFlight = true
-      controller = typeof AbortController === 'function' ? new AbortController() : null
-      setState((previous) => ({ ...previous, loading: true }))
-      requestOverview(controller ? controller.signal : undefined).then((outcome) => {
-        if (disposed) return
-        inFlight = false
-        if (outcome.data) {
-          setState({ data: outcome.data, error: null, loading: false, refreshedAt: Date.now() })
-        } else if (outcome.error) {
-          setState((previous) => ({ ...previous, loading: false, error: outcome.error }))
-        } else {
-          setState((previous) => ({ ...previous, loading: false }))
-        }
-      })
-    }
-
-    load()
-    const timer = setInterval(load, POLL_INTERVAL_MS)
-    return () => {
-      disposed = true
-      clearInterval(timer)
-      if (controller) controller.abort()
-    }
-  }, [generation])
-
-  return [state, reload]
-}
 
 /** Read a finite counter, tolerating a partially shaped payload. */
 function counterValue(counts, key) {
@@ -171,7 +40,7 @@ function DecisionPill({ decision }) {
 
 /** The panel body; only mounted for this package's subject. */
 function OverviewBody({ t }) {
-  const [state, reload] = useOverview()
+  const [state, reload] = useOverview(POLL_INTERVAL_MS)
   const { data, error, loading, refreshedAt } = state
 
   const plugin = data && data.plugin && typeof data.plugin === 'object' ? data.plugin : null

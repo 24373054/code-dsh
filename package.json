@@ -1,6 +1,6 @@
 {
-  "name": "@00ccf/dsh-trust-platform",
-  "version": "0.3.0",
+  "name": "@sealwax/dsh-trust-platform",
+  "version": "0.4.0",
   "description": "Trusted identity and payment-governance tools for multi-agent cross-border payment workflows.",
   "type": "module",
   "main": "src/index.js",
@@ -50,6 +50,28 @@
     "pack:check": "node scripts/build-client.mjs && npm pack --dry-run"
   },
   "license": "MIT",
+  "author": "sealwax",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/24373054/code-dsh.git"
+  },
+  "homepage": "https://github.com/24373054/code-dsh#readme",
+  "bugs": {
+    "url": "https://github.com/24373054/code-dsh/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "identity",
+    "trust",
+    "payments",
+    "cross-border",
+    "agent"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "esbuild": "^0.25.12"
   }

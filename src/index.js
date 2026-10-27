@@ -7,7 +7,7 @@
  * authoritative tools backed by the legacy FastAPI control plane and provides a
  * `trustPlatformClient` service for other plugins.
  *
- * @module @00ccf/dsh-trust-platform
+ * @module @sealwax/dsh-trust-platform
  */
 
 import Schema from '@deepseek-ai/schemastery'
@@ -100,7 +100,7 @@ export function apply(ctx, config) {
       ctx.tools.register(definition)
     }
     registerUiRoute(ctx, {
-      getOverview: () => buildControlPlaneOverview({ client, state, startedAt }),
+      getOverview: () => buildControlPlaneOverview({ client, state, startedAt, settings }),
     })
     return
   }
@@ -124,6 +124,7 @@ export function apply(ctx, config) {
         state,
         startedAt,
         health: { status: 'sandbox' },
+        config: publicConfig(settings),
       }),
   })
 }
@@ -137,9 +138,10 @@ export function apply(ctx, config) {
  * @param options.client - the plugin's control-plane client.
  * @param options.state - control-plane state container.
  * @param options.startedAt - ISO timestamp captured when the plugin applied.
+ * @param options.settings - normalized plugin configuration.
  * @returns overview object consumed by the browser half.
  */
-async function buildControlPlaneOverview({ client, state, startedAt }) {
+async function buildControlPlaneOverview({ client, state, startedAt, settings }) {
   let health
   try {
     const { data } = await client.request('health', undefined, { timeoutMs: 2000 })
@@ -151,7 +153,30 @@ async function buildControlPlaneOverview({ client, state, startedAt }) {
       checked_at: new Date().toISOString(),
     }
   }
-  return buildOverview({ mode: 'control-plane', version: PLUGIN_VERSION, state, startedAt, health })
+  return buildOverview({
+    mode: 'control-plane',
+    version: PLUGIN_VERSION,
+    state,
+    startedAt,
+    health,
+    config: publicConfig(settings),
+  })
+}
+
+/**
+ * Reduce plugin configuration to display-safe fields for the browser half.
+ *
+ * @param settings - normalized plugin configuration.
+ * @returns config block without the bearer token.
+ */
+function publicConfig(settings) {
+  return {
+    baseUrl: settings.baseUrl,
+    actorDid: settings.actorDid,
+    timeoutMs: settings.timeoutMs,
+    allowInterventionExecution: settings.allowInterventionExecution,
+    tokenConfigured: settings.token !== '',
+  }
 }
 
 /**

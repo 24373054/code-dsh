@@ -237,6 +237,41 @@ export const pluginBadge = {
   whiteSpace: 'nowrap'
 }
 
+/** Read-only configuration table of the settings page. */
+export const configTable = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '2px',
+  marginTop: '8px'
+}
+
+export const configRow = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: '12px',
+  paddingTop: '5px',
+  borderTop: '1px solid var(--dsw-color-border, rgba(127, 127, 127, 0.18))',
+  fontSize: '12px'
+}
+
+export const configKey = {
+  flex: '0 0 190px',
+  color: MUTED
+}
+
+export const configValue = {
+  color: 'var(--dsw-color-text-primary, inherit)',
+  wordBreak: 'break-word'
+}
+
+/** Footnote under a settings block (read-only explanation, hints). */
+export const note = {
+  marginTop: '10px',
+  color: MUTED,
+  fontSize: '11px',
+  lineHeight: 1.5
+}
+
 /** Shared shape of a status/decision pill; tone styles only recolour it. */
 export const pill = {
   display: 'inline-flex',

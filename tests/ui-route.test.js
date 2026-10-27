@@ -126,7 +126,7 @@ test('overview reports sandbox records and recent operation events', async () =>
   assert.equal(response.captured.headers['cache-control'], 'no-store')
   assert.equal(payload.ok, true)
   const overview = payload
-  assert.equal(overview.plugin.name, '@00ccf/dsh-trust-platform')
+  assert.equal(overview.plugin.name, '@sealwax/dsh-trust-platform')
   assert.equal(overview.plugin.mode, 'in-memory')
   assert.equal(overview.plugin.source, 'in-memory-sandbox')
   assert.equal(overview.plugin.authoritative, false)

@@ -23,6 +23,7 @@ import {
   normalizeOverviewBody,
   parsePayload,
   rawPayload,
+  readConfig,
   resultSummary,
   toolDecision,
   toolState
@@ -224,7 +225,28 @@ test('apply registers the plugin-manager overview entries', () => {
   assert.equal(badge.options.id, 'trust-platform-badge')
   assert.equal(badge.options.locale, NS)
 
-  assert.equal(registrations.length, 10)
+  assert.equal(registrations.length, 11)
+})
+
+test('apply registers the read-only settings section', () => {
+  const { exports } = loadBundle()
+  const { context, registrations } = createClientContext()
+  exports.apply(context)
+
+  const entry = registrations.find((item) => item.options.name === 'settings.section')
+  assert.ok(entry, 'the settings section must register')
+  assert.equal(entry.options.id, 'trust-platform')
+  assert.equal(entry.options.order, 55)
+  assert.equal(entry.options.locale, NS)
+  assert.equal(typeof entry.options.label, 'function')
+  assert.equal(entry.options.label(), en['settings.nav'])
+  assert.equal(typeof entry.options.inject, 'function')
+  // The injected props are a fresh object from the bundle's realm; compare keys.
+  assert.deepEqual(Object.keys(entry.options.inject()), [])
+  assert.equal(typeof entry.component, 'function')
+
+  // The page only needs the framework-bound `t`; rendering it offline must not throw.
+  assert.doesNotThrow(() => entry.component({ t: (key) => key, close: () => {} }))
 })
 
 test('overview entries ignore other packages', () => {
@@ -234,7 +256,7 @@ test('overview entries ignore other packages', () => {
 
   const section = registrations.find((entry) => entry.options.name === 'plugins.detail.section').component
   const badge = registrations.find((entry) => entry.options.name === 'plugins.detail.badge').component
-  const otherSubject = { kind: 'bundle', pkg: { name: '@00ccf/some-other-plugin', version: '1.0.0' } }
+  const otherSubject = { kind: 'bundle', pkg: { name: '@sealwax/some-other-plugin', version: '1.0.0' } }
   assert.equal(section({ t: (key) => key, subject: otherSubject }), null)
   assert.equal(badge({ t: (key) => key, subject: otherSubject }), null)
 })
@@ -257,7 +279,19 @@ test('apply registers both dictionaries under the trust-platform namespace', () 
 
 test('locales cover the tool titles and shared vocabulary', () => {
   for (const key of TOOL_KEYS) assert.ok(hasCopy(`tool.${key}`), `missing English title for ${key}`)
-  for (const key of ['status.ok', 'status.failed', 'status.running', 'result.waiting', 'card.raw.show']) {
+  for (const key of [
+    'status.ok',
+    'status.failed',
+    'status.running',
+    'result.waiting',
+    'card.raw.show',
+    'settings.nav',
+    'settings.title',
+    'settings.config',
+    'settings.counts',
+    'settings.error.forbidden',
+    'settings.error.stale'
+  ]) {
     assert.ok(hasCopy(key), `missing English copy for ${key}`)
   }
   assert.deepEqual(Object.keys(en).sort(), Object.keys(zh).sort(), 'zh and en must stay key-identical')
@@ -304,6 +338,35 @@ test('format helpers interpret the canonical result envelope', () => {
   assert.equal(formatTime('not-a-date'), 'not-a-date')
   assert.equal(formatTime(undefined), null)
   assert.equal(typeof formatTime(Date.now()), 'string')
+})
+
+test('settings config projection reads only documented fields', () => {
+  const plugin = {
+    name: PLUGIN_ID,
+    config: {
+      base_url: 'https://cp.example.test',
+      actor_did: 'did:example:abc',
+      timeout_ms: 15000,
+      allow_intervention_execution: true,
+      token_configured: false,
+      token: 'must-never-be-rendered'
+    }
+  }
+  assert.deepEqual(readConfig(plugin), {
+    baseUrl: 'https://cp.example.test',
+    actorDid: 'did:example:abc',
+    timeoutMs: 15000,
+    allowInterventionExecution: true,
+    tokenConfigured: false
+  })
+  assert.equal(readConfig({ name: PLUGIN_ID }), null)
+  assert.deepEqual(readConfig({ config: { timeout_ms: 'soon' } }), {
+    baseUrl: null,
+    actorDid: null,
+    timeoutMs: null,
+    allowInterventionExecution: null,
+    tokenConfigured: null
+  })
 })
 
 test('matchesPlugin recognizes every plugin-manager subject shape', () => {

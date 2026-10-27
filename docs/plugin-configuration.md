@@ -1,6 +1,6 @@
 # Plugin configuration
 
-`@00ccf/dsh-trust-platform` is a DSH function plugin that registers trust-platform tools through the
+`@sealwax/dsh-trust-platform` is a DSH function plugin that registers trust-platform tools through the
 Harness `tools` service. It has two modes:
 
 | | `in-memory` (default) | `control-plane` |
@@ -109,7 +109,7 @@ Cordis' Schemastery validation additionally rejects unknown modes and wrong fiel
 
 ## Request behaviour
 
-The exported client (`@00ccf/dsh-trust-platform/client`) and the control-plane tools use it for every
+The exported client (`@sealwax/dsh-trust-platform/client`) and the control-plane tools use it for every
 call:
 
 - **Fixed routes.** Only operations in the frozen `ROUTES` map are callable; there is no

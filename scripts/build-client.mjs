@@ -19,7 +19,7 @@ import { build } from 'esbuild'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const ENTRY = resolve(ROOT, 'src/client/index.jsx')
 const OUTFILE = resolve(ROOT, 'lib/client.js')
-const PLUGIN_ID = '@00ccf/dsh-trust-platform'
+const PLUGIN_ID = '@sealwax/dsh-trust-platform'
 
 /**
  * Module requests the shell seeds into every plugin's loader. Anything not in
