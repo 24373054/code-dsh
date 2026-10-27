@@ -6,8 +6,8 @@ Harness `tools` service. It has two modes:
 | | `in-memory` (default) | `control-plane` |
 | --- | --- | --- |
 | Backend | Local process memory, no network | Real trust control-plane HTTP service |
-| Tools | 9 canonical sandbox tools | 9 authoritative canonical tools + 27 adapter tools (36 total) |
-| With `allowInterventionExecution: true` | n/a | 37 tools (`execute_intervention` added) |
+| Tools | 9 canonical sandbox tools | 9 authoritative canonical tools + 27 adapter tools + 22 full-surface tools (58 total) |
+| With `allowInterventionExecution: true` | n/a | 59 tools (`execute_intervention` added) |
 | Decision source | Illustrative local rules (`authoritative: false`) | The service (`authoritative: true`) |
 | Persistence | None, resets when the process exits | Service database |
 | Requirements | None | A reachable control plane and, in production, a bearer token |

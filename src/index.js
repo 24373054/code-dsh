@@ -16,6 +16,7 @@ import { createRequire } from 'node:module'
 
 import { createControlPlaneClient, validateBaseUrl } from './control-plane-client.js'
 import { createControlPlaneTools } from './control-plane-tools.js'
+import { createCoverageTools } from './coverage-tools.js'
 import { createInMemoryTools } from './in-memory-tools.js'
 import { createRemoteTools } from './remote-tools.js'
 import { buildOverview, createControlPlaneState, createSandboxState } from './state.js'
@@ -97,6 +98,9 @@ export function apply(ctx, config) {
       ctx.tools.register(definition)
     }
     for (const definition of createRemoteTools({ resolveClient, config: settings })) {
+      ctx.tools.register(definition)
+    }
+    for (const definition of createCoverageTools({ resolveClient })) {
       ctx.tools.register(definition)
     }
     registerUiRoute(ctx, {

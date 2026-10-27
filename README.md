@@ -58,7 +58,8 @@ examples, validation errors and security semantics.
 `check_authorization`, `create_payment_task`, `submit_operation_event`, `get_risk_decision`,
 `request_step_up`, `get_execution_receipt`.
 
-**Control plane (36):** the same nine canonical tools, backed by the service, plus 27 adapter tools:
+**Control plane (58):** the same nine canonical tools, backed by the service, plus 27 adapter tools and
+22 full-surface tools:
 
 - Remote reads and decisions (21): `check_service_health`, `resolve_identity_admission`,
   `verify_remote_credential`, `read_payment_task`, `list_payment_tasks`, `read_delegation`,
@@ -69,7 +70,15 @@ examples, validation errors and security semantics.
 - Lifecycle helpers (6): `create_delegation`, `revoke_delegation`, `issue_credential`,
   `read_credential`, `transition_payment_task`, `create_trace_report`.
 
-With `allowInterventionExecution: true` the control-plane mode registers 37 tools: the 36 above plus
+- Full control-plane surface (22): `list_identities`, `get_identity_keys`, `rotate_identity_keys`,
+  `set_identity_status`, `read_credential_status`, `set_credential_status`, `query_operation_events`,
+  `read_operation_event`, `anchor_evidence`, `read_evidence_anchors`, `list_trace_cases`,
+  `read_trace_case`, `read_case_trace`, `list_case_reports`, `list_governance_policies`,
+  `publish_governance_policy`, `list_governance_models`, `publish_governance_model`,
+  `ingest_knowledge_document`, `publish_knowledge_document`, `read_knowledge_document`,
+  `read_metrics`.
+
+With `allowInterventionExecution: true` the control-plane mode registers 59 tools: the 58 above plus
 `execute_intervention`.
 
 ## Safety invariants

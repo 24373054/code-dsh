@@ -202,7 +202,7 @@ test('control-plane mode provides the client and registers authoritative tools',
   const client = ctx.get('trustPlatformClient')
   assert.equal(typeof client.request, 'function')
   assert.equal(client.baseUrl, 'http://127.0.0.1:8080')
-  assert.equal(ctx.registeredTools.size, 36)
+  assert.equal(ctx.registeredTools.size, 58)
   assert.equal(ctx.registeredTools.has('execute_intervention'), false)
   for (const toolName of [
     'register_identity',
@@ -225,7 +225,7 @@ test('execute_intervention is registered only when explicitly allowed', () => {
     baseUrl: 'http://127.0.0.1:8080',
     allowInterventionExecution: true,
   })
-  assert.equal(ctx.registeredTools.size, 37)
+  assert.equal(ctx.registeredTools.size, 59)
   assert.ok(ctx.registeredTools.has('execute_intervention'))
 })
 

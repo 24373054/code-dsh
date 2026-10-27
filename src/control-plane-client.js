@@ -73,6 +73,9 @@ export function validateBaseUrl(baseUrl) {
 /** One immutable route: HTTP method, path template, and idempotency policy. */
 const route = (method, path, idempotency) => Object.freeze({ method, path, idempotency })
 
+/** One immutable route served as raw text instead of JSON (Prometheus metrics). */
+const rawRoute = (method, path) => Object.freeze({ method, path, idempotency: 'none', raw: true })
+
 /**
  * Every supported control-plane operation.
  *
@@ -84,6 +87,7 @@ const route = (method, path, idempotency) => Object.freeze({ method, path, idemp
 export const ROUTES = Object.freeze({
   health: route('GET', '/health', 'none'),
   ready: route('GET', '/ready', 'none'),
+  metrics: rawRoute('GET', '/metrics'),
 
   didRegister: route('POST', '/v1/dids/register', 'optional'),
   didList: route('GET', '/v1/dids', 'none'),
@@ -307,6 +311,19 @@ export function createControlPlaneClient({
     }
 
     const rawBody = await response.text().catch(() => '')
+    if (entry.raw === true) {
+      if (!response.ok) {
+        throw new ControlPlaneError({
+          code: `TRUST_HTTP_${response.status}`,
+          message: `control plane returned HTTP ${response.status} for "${operation}"`,
+          status: response.status,
+          requestId: response.headers?.get?.('x-request-id') ?? requestId,
+          retryable: response.status >= 500 || response.status === 429,
+          operation,
+        })
+      }
+      return { data: rawBody, status: response.status, requestId: response.headers?.get?.('x-request-id') ?? requestId }
+    }
     const data = parseJson(rawBody)
     if (!response.ok) {
       const flat = data !== null && typeof data === 'object' && !Array.isArray(data) ? data : {}
