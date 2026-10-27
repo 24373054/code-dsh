@@ -19,6 +19,7 @@ import {
   text,
   uniqueId,
 } from './toolkit.js'
+import { cacheEvent, createControlPlaneState } from './state.js'
 
 /** Fields that must be present before a delegation can authorize anything. */
 const REQUIRED_DELEGATION_FIELDS = [
@@ -165,12 +166,16 @@ export function subjectFromDid(did) {
  * @param options.resolveClient - lazy lookup of the `trustPlatformClient` service.
  * @param options.config - normalized plugin configuration.
  * @param options.allowInterventionExecution - register the execution tool.
+ * @param options.state - state container shared with the browser overview.
  * @returns tool definitions to register on `ctx.tools`.
  */
-export function createControlPlaneTools({ resolveClient, config, allowInterventionExecution }) {
-  const identities = new Map()
-  const authorizations = new Map()
-  const tasks = new Map()
+export function createControlPlaneTools({
+  resolveClient,
+  config,
+  allowInterventionExecution,
+  state = createControlPlaneState(),
+}) {
+  const { identities, authorizations, tasks } = state
 
   /** Tool builder: resolve the client lazily and forward caller cancellation. */
   const tool = (name, description, parameters, execute) =>
@@ -502,6 +507,7 @@ export function createControlPlaneTools({ resolveClient, config, allowInterventi
         const counterpartyDid = optionalText(args.counterparty_did)
         if (counterpartyDid !== undefined) payload.counterparty_did = counterpartyDid
         const { data } = await client.request('eventCreate', payload, options)
+        cacheEvent(state, plainObject(data) ? data : payload)
         return succeeded({ event: data, source: CONTROL_PLANE_SOURCE, authoritative: true })
       },
     ),

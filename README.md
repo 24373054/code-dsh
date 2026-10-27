@@ -92,19 +92,64 @@ With `allowInterventionExecution: true` the control-plane mode registers 37 tool
 
 ## Client export
 
-`@00ccf/dsh-trust-platform/client` exports the fixed-route HTTP adapter used in control-plane mode:
+`@00ccf/dsh-trust-platform/control-plane-client` exports the fixed-route HTTP adapter used in
+control-plane mode:
 `createControlPlaneClient`, `ROUTES`, `ControlPlaneError` and `validateBaseUrl`. It maps the service's
 flat error body (`error_code`, `message`, `request_id`, `retryable`, `evidence_refs`,
 `policy_version`), sends `X-Request-ID`, optional `X-Actor-DID`/`Authorization`, generates
 `Idempotency-Key` on writes that need one, supports GET query parameters and enforces per-request
-timeouts. In control-plane mode the plugin provides it as the `trustPlatformClient` service.
+timeouts. In control-plane mode the plugin provides it as the `trustPlatformClient` service. Since
+0.3.0 the `./client` subpath resolves to the browser bundle described below; importing the HTTP
+adapter from Node code now uses the explicit `./control-plane-client` subpath.
+
+## Browser UI
+
+Version 0.3.0 adds the browser half that the DSH Web GUI loads lazily. Installation is unchanged: the
+package declares `dsh.client` (`platform: web`) and ships the prebuilt bundle at `lib/client.js`, so
+`dsh plugin add` activates it without a build step. The bundle is a lazy CommonJS factory
+(`window.__ModuleLoader__.load`) whose only bare imports are shell baseline modules (`react`,
+`react/jsx-runtime`).
+
+The browser half provides:
+
+- **Tool renderers** in the conversation for eight governed calls: `register_identity`,
+  `get_identity_status`, `verify_credential`, `check_authorization`, `create_payment_task`,
+  `get_risk_decision`, `verify_operation_event` and `get_execution_receipt`. Each renders as a
+  compact card with a localized title, a status badge (`ok` / `failed` / `running`), the tool's
+  `decision` badge when present (`ALLOW`, `DENY`, `DEFER`, `STEP_UP`, …), a one-line code/message
+  summary and a disclosure toggle for the raw JSON result. Unrecognized payloads degrade to the raw
+  text instead of throwing.
+- **Plugin overview panel** in Settings → Plugins → DSH Trust Platform: mode (`control-plane` /
+  `in-memory`), source and authoritative flags, control-plane health, the six entity counters
+  (identities, credentials, authorizations, tasks, events, receipts) and the ten most recent events.
+  It polls the same-origin route `GET /trust-platform/api/overview` every 5 seconds while mounted and
+  keeps the last good snapshot if a refresh fails.
+- **Package badge** showing the version of the active trust-platform package.
+
+The overview route is served by the plugin's host half and uses the GUI session; a `403`, `500` or
+network error is rendered as a localized, retryable message instead of a broken panel. The browser
+half sends no telemetry and no data leaves the DSH origin.
+
+The bundle is committed at `lib/client.js` and rebuilt from source with esbuild:
+
+```sh
+npm run build:client   # src/client/index.jsx -> lib/client.js (lazy-CJS wrapper, size check)
+```
+
+`src/client/` holds the source: `index.jsx` (registrations), `toolviews.jsx`, `overview.jsx`,
+`locales.js` (zh/en dictionaries), `format.js` (payload parsing) and `styles.js` (inline styles using
+DSH design-token CSS variables with fallbacks). `tests/client-bundle.test.js` builds the bundle,
+executes it in a `node:vm` sandbox with stubbed baseline modules and asserts the registered slots,
+the module envelope and the absence of non-baseline imports — offline and without a browser.
 
 ## Development
 
 ```sh
-npm test            # node --test tests/*.test.js (offline, stubbed fetch)
-npm run pack:check  # npm pack --dry-run
+npm test             # node --test tests/*.test.js (offline, stubbed fetch)
+npm run build:client # rebuild lib/client.js from src/client/
+npm run pack:check   # rebuild the browser bundle, then npm pack --dry-run
 ```
 
-The tests never use the network or a live server; a separate integration harness can exercise the
+The tests never use the network or a live server; the bundle test rebuilds `lib/client.js` first so
+the committed artifact and the source cannot drift. A separate integration harness can exercise the
 real service. Requires DSH `>=0.2.1-rc.3 <0.3.0` (`engines.dsh`) and `@deepseek-ai/cordis ~4.0.5`.

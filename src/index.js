@@ -12,10 +12,17 @@
 
 import Schema from '@deepseek-ai/schemastery'
 
+import { createRequire } from 'node:module'
+
 import { createControlPlaneClient, validateBaseUrl } from './control-plane-client.js'
 import { createControlPlaneTools } from './control-plane-tools.js'
 import { createInMemoryTools } from './in-memory-tools.js'
 import { createRemoteTools } from './remote-tools.js'
+import { buildOverview, createControlPlaneState, createSandboxState } from './state.js'
+import { registerUiRoute } from './ui-route.js'
+
+/** Plugin version surfaced by the browser half; read once when the module loads. */
+const PLUGIN_VERSION = readPluginVersion()
 
 /** Plugin name registered with Cordis. */
 export const name = 'dsh-trust-platform'
@@ -67,6 +74,7 @@ export const Config = Schema.object({
  */
 export function apply(ctx, config) {
   const settings = normalizeConfig(config)
+  const startedAt = new Date().toISOString()
 
   if (settings.mode === 'control-plane') {
     const client = createControlPlaneClient({
@@ -79,16 +87,21 @@ export function apply(ctx, config) {
     // Resolve lazily on every call: reloads can replace the service, and tools
     // must never hold a stale client from apply time.
     const resolveClient = () => ctx.get('trustPlatformClient')
+    const state = createControlPlaneState()
     for (const definition of createControlPlaneTools({
       resolveClient,
       config: settings,
       allowInterventionExecution: settings.allowInterventionExecution,
+      state,
     })) {
       ctx.tools.register(definition)
     }
     for (const definition of createRemoteTools({ resolveClient, config: settings })) {
       ctx.tools.register(definition)
     }
+    registerUiRoute(ctx, {
+      getOverview: () => buildControlPlaneOverview({ client, state, startedAt }),
+    })
     return
   }
 
@@ -101,7 +114,44 @@ export function apply(ctx, config) {
         'the in-memory sandbox has no intervention execution endpoint',
     )
   }
-  for (const definition of createInMemoryTools()) ctx.tools.register(definition)
+  const state = createSandboxState()
+  for (const definition of createInMemoryTools(state)) ctx.tools.register(definition)
+  registerUiRoute(ctx, {
+    getOverview: async () =>
+      buildOverview({
+        mode: 'in-memory',
+        version: PLUGIN_VERSION,
+        state,
+        startedAt,
+        health: { status: 'sandbox' },
+      }),
+  })
+}
+
+/**
+ * Snapshot control-plane health plus the cached records for the overview route.
+ *
+ * A health failure never fails the whole overview: the route reports the cached
+ * counts and marks the service unreachable so the browser can render a warning.
+ *
+ * @param options.client - the plugin's control-plane client.
+ * @param options.state - control-plane state container.
+ * @param options.startedAt - ISO timestamp captured when the plugin applied.
+ * @returns overview object consumed by the browser half.
+ */
+async function buildControlPlaneOverview({ client, state, startedAt }) {
+  let health
+  try {
+    const { data } = await client.request('health', undefined, { timeoutMs: 2000 })
+    health = data !== null && typeof data === 'object' ? data : { status: 'unknown' }
+  } catch (error) {
+    health = {
+      status: 'unreachable',
+      error_code: typeof error?.code === 'string' ? error.code : 'TRUST_HEALTH_UNAVAILABLE',
+      checked_at: new Date().toISOString(),
+    }
+  }
+  return buildOverview({ mode: 'control-plane', version: PLUGIN_VERSION, state, startedAt, health })
 }
 
 /**
@@ -123,4 +173,19 @@ function normalizeConfig(config) {
     withDefaults.baseUrl = validateBaseUrl(withDefaults.baseUrl)
   }
   return withDefaults
+}
+
+/**
+ * Read this package's version without a JSON import assertion.
+ *
+ * @returns the version string, or "0.0.0" when the manifest cannot be read.
+ */
+function readPluginVersion() {
+  try {
+    const require = createRequire(import.meta.url)
+    const manifest = require('../package.json')
+    return typeof manifest?.version === 'string' ? manifest.version : '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
 }

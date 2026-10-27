@@ -1,17 +1,21 @@
 {
   "name": "@00ccf/dsh-trust-platform",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Trusted identity and payment-governance tools for multi-agent cross-border payment workflows.",
   "type": "module",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./client": "./src/control-plane-client.js",
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./control-plane-client": "./src/control-plane-client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
+    "lib",
     "cordis.patch.yml",
     "README.md",
     "docs",
@@ -30,11 +34,23 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
-    }
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    },
+    "manifestVersion": 1
   },
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "pack:check": "npm pack --dry-run"
+    "build:client": "node scripts/build-client.mjs",
+    "pack:check": "node scripts/build-client.mjs && npm pack --dry-run"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.25.12"
+  }
 }

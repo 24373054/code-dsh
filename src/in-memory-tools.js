@@ -18,6 +18,7 @@ import {
   text,
   uniqueId,
 } from './toolkit.js'
+import { createSandboxState } from './state.js'
 
 /** Demo-only per-intent ceiling enforced by the sandbox authorization policy. */
 const SANDBOX_AMOUNT_CEILING = 10000
@@ -30,15 +31,12 @@ const SANDBOX_NOTE = 'In-memory sandbox: this record is not authoritative and is
 /**
  * Create the nine canonical tools backed by the local sandbox.
  *
+ * @param state - state container shared with the browser overview; defaults to
+ *   a fresh container so tests and embedders keep the previous behavior.
  * @returns tool definitions to register on `ctx.tools`.
  */
-export function createInMemoryTools() {
-  const identities = new Map()
-  const credentials = new Map()
-  const authorizations = new Map()
-  const tasks = new Map()
-  const events = []
-  const executions = new Map()
+export function createInMemoryTools(state = createSandboxState()) {
+  const { identities, credentials, authorizations, tasks, events, executions } = state
 
   return [
     definePluginTool({
