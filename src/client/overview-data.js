@@ -84,7 +84,7 @@ export async function requestOverview(signal) {
  * page says `settings`, so each surface keeps its own copy while sharing the
  * transport.
  *
- * @param {{ kind: string, status?: number, code?: string, message?: string }} error
+ * @param {{ kind: string, status?: number, code?: string, message?: string, details?: unknown }} error
  * @param {((key: string, params?: Record<string, unknown>) => string) | undefined} t
  * @param {'overview' | 'settings'} prefix
  */
@@ -96,6 +96,8 @@ export function describeError(error, t, prefix = 'overview') {
       return translate(t, `${prefix}.error.http`, { status: error.status })
     case 'network':
       return translate(t, `${prefix}.error.network`, { message: error.message })
+    case 'validation':
+      return translate(t, `${prefix}.error.validation`, { message: error.message || '—' })
     case 'host':
       return translate(t, `${prefix}.error.host`, { code: error.code, message: error.message || '—' })
     case 'unavailable':

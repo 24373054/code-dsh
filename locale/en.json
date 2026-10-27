@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Trust platform",
+    "description": "Embedded identity and payment-governance trust plane for multi-agent cross-border payment workflows.",
+    "detail": "docs/DETAIL.md"
+  }
+}

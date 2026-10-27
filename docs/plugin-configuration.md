@@ -1,173 +1,213 @@
 # Plugin configuration
 
-`@sealwax/dsh-trust-platform` is a DSH function plugin that registers trust-platform tools through the
-Harness `tools` service. It has two modes:
+`@sealwax/dsh-trust-platform` is a DSH function plugin that registers the trust-platform tools and
+serves the browser half from the same package. The whole trust plane — identities, credentials,
+delegations, payment tasks, operation events, risk evidence, interventions, receipts, evidence, cases,
+reports, knowledge documents and governance records — runs **inside the plugin process**. There is no
+sidecar control plane, no `baseUrl`, no bearer token and no listening port.
 
-| | `in-memory` (default) | `control-plane` |
+The engine keeps its records in a profile-owned data directory and runs deterministically offline.
+
+## Modes
+
+| | `embedded` (default) | `sandbox` |
 | --- | --- | --- |
-| Backend | Local process memory, no network | Real trust control-plane HTTP service |
-| Tools | 9 canonical sandbox tools | 9 authoritative canonical tools + 27 adapter tools + 22 full-surface tools (58 total) |
-| With `allowInterventionExecution: true` | n/a | 59 tools (`execute_intervention` added) |
-| Decision source | Illustrative local rules (`authoritative: false`) | The service (`authoritative: true`) |
-| Persistence | None, resets when the process exits | Service database |
-| Requirements | None | A reachable control plane and, in production, a bearer token |
+| Store | JSON file under `$DSH_HOME/plugin-data/dsh-trust-platform/state.json` | Process memory only |
+| Persistence | Survives plugin reloads, profile restarts and `dsh` upgrades | Lost when the plugin reloads |
+| Tools | 58 tools (59 with the intervention gate) | Same 58/59 tools, same names |
+| Authoritative | Yes (`source: "embedded-engine"`, `authoritative: true`) | No (`source: "in-memory-sandbox"`, `authoritative: false`) |
+| Typical use | Real workflows, settings panel, demos with durable state | Offline tests, throwaway experiments |
 
-Configuration is a Schemastery object exported as `Config`. Cordis validates it before `apply` runs
-and fills every default, so a deployment only sets the fields it changes. Invalid configuration fails
-plugin load with an actionable error; the plugin never falls back silently.
+Both modes share the same engine, the same tool surface and the same browser API. Only the store
+differs, so a sandbox session can be validated with tests and then repeated in embedded mode without
+changing any tool call.
 
 ## Fields
 
+`Config` is a Schemastery object. Cordis validates it before `apply` runs and fills every default, so a
+deployment only sets the fields it changes. Invalid configuration fails plugin load with an actionable
+error; the plugin never falls back silently.
+
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `mode` | `"in-memory"` \| `"control-plane"` | `"in-memory"` | Backend used by the nine canonical tools. |
-| `baseUrl` | string | `""` | Control-plane origin. Required and validated in `control-plane` mode: absolute `http(s)` URL, no credentials embedded, trailing slash trimmed. |
-| `token` | string (secret role) | `""` | Bearer token sent as `Authorization: Bearer <token>` on every control-plane request. Never logged or returned by the client. |
-| `actorDid` | string | `""` | Sent as `X-Actor-DID`. Leave empty to let the service choose its actor (`system:console` in development, the token subject in production). |
-| `timeoutMs` | number | `30000` | Per-request timeout in milliseconds; must be a positive finite number. |
-| `allowInterventionExecution` | boolean | `false` | Control-plane only. Registers `execute_intervention`, which applies an intervention decision through the service. Requires `mode: control-plane`. |
+| `mode` | `"embedded"` \| `"sandbox"` | `"embedded"` | Persistence mode (see above). |
+| `dataDir` | string | `""` | Optional state directory for embedded mode. Empty uses `$DSH_HOME/plugin-data/dsh-trust-platform`. |
+| `actorDid` | string | `"system:dsh-web"` | Default actor DID recorded on writes. Also editable in **Settings → Trust platform**. |
+| `allowInterventionExecution` | boolean | `false` | Registers `execute_intervention`, which records an execution receipt. It records only and never transfers funds. Also editable in the settings panel. |
+| `policy.policyVersion` | string | `"policy-2026-10-25-001"` | Policy version stamped on decisions and evidence. |
+| `policy.singleAmountLimit` | number | `1000000` | Single-payment ceiling used by admission and authorization checks. |
+| `policy.dailyAmountLimit` | number | `5000000` | Daily ceiling used by admission and authorization checks. |
+| `policy.riskBlockThreshold` | number | `0.8` | BLOCK at or above this risk score. |
+| `policy.riskDeferThreshold` | number | `0.6` | DEFER at or above this risk score. |
+| `policy.riskThrottleThreshold` | number | `0.4` | THROTTLE at or above this risk score. |
+| `policy.defaultTrustScore` | number | `0.95` | Trust score assigned to a freshly registered identity. |
 
-The schema is available as `Config` and accepts `Config({})` (all defaults) or
-`Config['~standard'].validate(value)`.
+The risk thresholds must satisfy `riskBlockThreshold >= riskDeferThreshold >= riskThrottleThreshold`.
+The schema is exported as `Config`; `Config({})` produces all defaults.
+
+## What is editable at runtime
+
+Three groups of settings can be changed from the DSH Web GUI (**Settings → Trust platform**) without
+editing the profile, and are persisted with the engine state:
+
+- `actorDid`
+- `allowInterventionExecution` (takes effect for tools registered on the next plugin load)
+- every `policy.*` field listed above
+
+The settings page validates input, submits only changed fields and shows the host's validation
+message. The browser API behind it is documented in [Browser API](#browser-api).
+
+Everything else — `mode` and `dataDir` — is host configuration: those values decide where the engine
+lives, so they stay in the profile's `cordis.patch.yml` row.
 
 ## Deployment examples
 
-### Sandbox (default)
+### Sandbox (default row)
 
-No configuration row is needed; the plugin's own `cordis.patch.yml` inserts the row with schema
-defaults. An explicit row is equivalent:
+The plugin's `cordis.patch.yml` inserts the row with schema defaults. An explicit row is equivalent:
 
 ```yaml
 - id: trust-platform-tools
   config:
-    mode: in-memory
+    mode: sandbox
 ```
 
 The sandbox is useful for tool discovery, prompts and offline demos. Its decisions are **not**
-authoritative and must not gate real payments.
+authoritative and must not gate real payments; every sandbox result says
+`source: "in-memory-sandbox"` / `authoritative: false`.
 
-### Development control plane
+### Embedded with the default data directory
 
 ```yaml
 - id: trust-platform-tools
-  config:
-    mode: control-plane
-    baseUrl: http://127.0.0.1:8080
-    timeoutMs: 30000
 ```
 
-Development servers accept requests without a token and default the actor to `system:console`, which
-bypasses task ownership checks. Set `actorDid` to the caller DID when the workflow creates tasks for a
-specific requester; the task `requester_did`, entity `actor_did`, and `submitted_by` fields fall back to
-`actorDid` where a tool allows it.
+That is the recommended row for a real profile: state lives in
+`$DSH_HOME/plugin-data/dsh-trust-platform/state.json`, `actorDid` defaults to `system:dsh-web`, and the
+intervention gate stays off.
 
-### Production control plane
+### Embedded with a custom data directory and actor
 
 ```yaml
 - id: trust-platform-tools
   config:
-    mode: control-plane
-    baseUrl: https://trust.internal.example
-    token: <HS256 JWT>
+    mode: embedded
+    dataDir: /var/lib/dsh/trust-platform
     actorDid: did:trust:corp.example:agent-7
-    timeoutMs: 15000
-    allowInterventionExecution: false
+    policy:
+      policyVersion: policy-2026-10-25-001
+      singleAmountLimit: 250000
+      dailyAmountLimit: 1000000
 ```
 
-Production requires a Bearer JWT; when `actorDid` is sent it must equal the token subject, otherwise the
-service rejects the call (`403 ACTOR_MISMATCH`). Keep `allowInterventionExecution` off unless the
-deployment is specifically trusted to execute intervention decisions.
+`dataDir` is a plain directory path; the engine creates it, writes `state.json` atomically (temporary
+file + rename) and debounces writes.
 
 ### Enabling intervention execution
 
 ```yaml
 - id: trust-platform-tools
   config:
-    mode: control-plane
-    baseUrl: https://trust.internal.example
-    token: <HS256 JWT>
     allowInterventionExecution: true
 ```
 
-`execute_intervention` calls `POST /v1/interventions/{id}/execute`. It applies the decision (the
-service may change task state and reserve quota) and returns the service execution receipt. It does
-not move funds by itself, but it is a state-changing operation, so it is opt-in and off by default.
+`execute_intervention` applies an existing intervention decision: it validates the decision, records an
+execution receipt (`target_system: "embedded-engine"`), updates the intervention's applied state and
+audits the action. It does **not** move funds, reserve a real quota or settle value. The tool is
+opt-in; with the gate off it is not registered at all, and calls to it fail as an unknown tool.
 
 ## Validation errors
 
 Configuration problems abort plugin load with messages such as:
 
-- `mode "control-plane" requires config.baseUrl to be a non-empty absolute http(s) URL (got "...")`
-- `mode "control-plane" requires config.baseUrl to be an absolute http(s) URL (got "...")`
-  (relative URL or unsupported scheme)
-- `mode "control-plane" requires config.baseUrl to be an absolute http(s) URL without embedded credentials`
-- `allowInterventionExecution requires mode "control-plane"; the in-memory sandbox has no intervention execution endpoint`
-- `timeoutMs must be a positive number of milliseconds`
+- `[dsh-trust-platform] unknown mode "x"; expected one of: embedded, sandbox`
+- Cordis/Schemastery type errors before `apply` runs, for example
+  `$.policy.riskBlockThreshold expected number but got high`.
 
-Cordis' Schemastery validation additionally rejects unknown modes and wrong field types before
-`apply` runs, for example: `$.mode expected "in-memory" | "control-plane" but got "sandbox"`.
+Browser settings patches are validated by the engine and rejected with HTTP 422
+`{"ok":false,"error_code":"VALIDATION_ERROR","message":…,"details":…}`:
 
-## Request behaviour
+- `actorDid` must be a string of 3–200 characters.
+- `allowInterventionExecution` must be a boolean.
+- `policy.policyVersion` must be a string of 3–120 characters.
+- amount limits must be finite numbers in `(0, 1e12]`.
+- risk thresholds and `defaultTrustScore` must be finite numbers in `[0, 1]`.
+- risk thresholds must satisfy `block >= defer >= throttle`.
+- unknown settings or policy fields are rejected.
 
-The exported client (`@sealwax/dsh-trust-platform/client`) and the control-plane tools use it for every
-call:
+## State file
 
-- **Fixed routes.** Only operations in the frozen `ROUTES` map are callable; there is no
-  arbitrary-URL entry point.
-- **Headers.** `Accept: application/json`, a fresh `X-Request-ID` per request, `X-Actor-DID` when
-  configured, `Authorization: Bearer` when a token is configured and `Content-Type: application/json`
-  on writes.
-- **Idempotency.** Writes that require an idempotency key receive a generated `dsh-<uuid>`
-  `Idempotency-Key` (overridable per call). Routes documented as idempotency-optional still get a
-  generated key; routes that must not carry one (GETs, credential verification, knowledge search) do
-  not.
-- **Query parameters.** GET reads accept query parameters, `undefined` values are skipped.
-- **Timeouts.** Every request carries `timeoutMs`; a timeout surfaces as `TRUST_TIMEOUT`
-  (`retryable: true`).
-- **Errors.** Non-2xx responses map the service's flat body
-  `{error_code, message, request_id, retryable, evidence_refs, policy_version, details?}` onto a
-  `ControlPlaneError` with the same fields. Transport failures become `TRUST_TRANSPORT_ERROR`,
-  caller cancellation `TRUST_ABORTED`, unparseable success bodies `TRUST_INVALID_RESPONSE`.
-  `retryable` is informational; the plugin does not retry writes automatically.
+`embedded` mode writes one JSON document: `state.json` in the data directory. It contains the
+schema version, engine settings (including the runtime-edited values), sequence counters, the audit
+log and every collection:
+
+`identities`, `identity_keys`, `credentials`, `credential_status`, `delegations`, `tasks`, `events`,
+`verifications`, `risk_evidence`, `interventions`, `receipts`, `evidence`, `anchors`, `cases`,
+`case_snapshots`, `reports`, `knowledge`, `knowledge_chunks`, `feedback`, `policies`, `models`,
+`idempotency`, `counters`, `activity`, `admission_decisions`.
+
+Writes are atomic (temp file + rename) and debounced; the plugin flushes pending state when it is
+disposed or reloaded. Corrupt state is never silently replaced: the loader reports the error and the
+plugin fails to start rather than starting with partial data.
+
+## Browser API
+
+The host half serves a same-origin route family under `/trust-platform/api`, guarded by the DSH
+connection's browser-session check (`401`/`403` for non-browser callers) and never cached
+(`cache-control: no-store`):
+
+| Method | Path | Response |
+| --- | --- | --- |
+| `GET` | `/trust-platform/api/overview` | Plugin, engine health, mode/source/authoritative, six counters and up to ten recent events. |
+| `GET` | `/trust-platform/api/health` | Engine health document (`status`, `engine`, `mode`, `schema_revision`, `started_at`). |
+| `GET` | `/trust-platform/api/settings` | Current runtime settings, the effective data directory and `editable: true`. |
+| `PUT` | `/trust-platform/api/settings` | Patch of `actorDid` / `allowInterventionExecution` / `policy.*`; returns the saved settings. |
+| `POST` | `/trust-platform/api/reset` | Requires `{"confirm":true}`; clears every engine record and keeps runtime settings. |
+
+The browser half (`lib/client.js`) consumes exactly these routes; it never talks to a third-party
+origin and never reads tokens or credentials.
 
 ## Security semantics
 
-- **No money movement.** No tool sends money, transfers, pays out or settles. `create_payment_task`
-  records a task and `get_execution_receipt` reports `NOT_SETTLED`; in control-plane mode it returns
-  `NOT_SUPPORTED` because the service exposes no receipt read endpoint.
-- **No ALLOW without evidence.** `check_authorization` never returns `ALLOW` when the delegation
-  record is missing, unreadable, incomplete, outside its validity window, revoked, scoped to another
-  action/subject/asset, or over its limits. Such cases are `DENY` or `DEFER`, and `DEFER` cannot be
-  used by `create_payment_task`, which requires an `ALLOW` authorization created in the same session.
-- **Risk is not authorization.** `get_risk_decision` and `evaluate_remote_risk` report what the risk
-  engine decided (`ALLOW`/`WARN`/`THROTTLE`/`STEP_UP`/`DEFER`/`BLOCK`/`FREEZE`); the canonical tool
-  exposes `authorization_effect: "NONE"` and never creates an authorization.
+- **No money movement.** No tool sends money, transfers, pays out or settles value.
+  `create_payment_task` records a task; `get_execution_receipt` reports the engine's receipt state
+  (`NOT_SETTLED` until an execution gate records one).
+- **No ALLOW without evidence.** `check_authorization` never returns `ALLOW` when the delegation record
+  is missing, unreadable, incomplete, outside its validity window, revoked, scoped to another
+  action/subject/asset, or over its limits; such cases are `DENY` or `DEFER`, and only an `ALLOW`
+  authorization is accepted by `create_payment_task`.
+- **Risk is not authorization.** `get_risk_decision` reports what the risk engine decided
+  (`ALLOW`/`WARN`/`THROTTLE`/`STEP_UP`/`DEFER`/`BLOCK`/`FREEZE`) and exposes
+  `authorization_effect: "NONE"`; it never creates an authorization.
 - **UNKNOWN / NOT_EVALUABLE never pass.** Credential verification distinguishes `VALID`, `INVALID`,
-  `UNKNOWN` and `NOT_EVALUABLE`; unsigned or unverified operation events report `UNKNOWN`, not
+  `UNKNOWN` and `NOT_EVALUABLE`; unsigned or unverifiable operation events report `UNKNOWN`, never
   `VALID`.
-- **No attestation claims.** Evidence anchoring and settlement are service-side concepts; the plugin
-  never claims an anchor is final or that settlement occurred.
-- **Sandbox is not authoritative.** In-memory mode is a deterministic demo: it does not call the
-  service and must not be treated as a trust decision. Every sandbox result says
-  `source: "in-memory-sandbox"` / `authoritative: false`.
-- **Actor identity.** In production the service binds the actor to the JWT subject; the plugin does
-  not invent DIDs or tokens.
+- **No attestation claims.** Anchoring records are deterministic local anchors
+  (`status: "CONFIRMED"`, `chain_id: "local-chain"`); the plugin never claims an external chain
+  finality or settlement.
+- **Sandbox is not authoritative.** Sandbox mode is a deterministic demo and is labeled as such in every
+  result and in the settings/overview panels.
+- **No secrets in the browser half.** The settings page displays the data directory and policy but no
+  token or key material; the engine's signing keys live only in the state file.
 
 ## Compatibility
 
 - Harness: `engines.dsh` is `>=0.2.1-rc.3 <0.3.0`.
-- Cordis peer dependency: `@deepseek-ai/cordis ~4.0.5`; tools are registered through the `tools`
-  service and the client is provided as the `trustPlatformClient` service in control-plane mode.
-- Runtime dependencies: `@deepseek-ai/dsh-tools` and `@deepseek-ai/schemastery`.
+- Host packages are **peer dependencies** (`@deepseek-ai/cordis ~4.0.5`,
+  `@deepseek-ai/dsh-tools >=0.2.1-rc.3 <0.3.0`, `@deepseek-ai/schemastery ~3.18.5`): the profile
+  resolves them from the harness itself, so a profile never installs a second copy that shadows the
+  harness services.
+- Tools are registered through the `tools` service; the engine is provided as the `trustPlane` model
+  service and resolved lazily on every tool call, so a plugin reload is picked up by later calls.
 - The plugin has no default export; it exports `name`, `inject`, `Config` and `apply`.
+- The browser half is a prebuilt lazy CommonJS bundle (`lib/client.js`) declaring
+  `dsh.client.platform: web` and injecting `@deepseek-ai/dsh-client-locale` and
+  `@deepseek-ai/dsh-client-ui-slots`.
 
 ## What this plugin does not do
 
 - It does not send money, transfer assets, pay out, settle or reconcile value.
-- It does not manage private keys, sign transactions or run a wallet.
-- It does not replace the control plane's policy engine; it consumes its decisions.
-- It does not cache authoritative decisions for later reuse across sessions; authorizations are
-  session-local.
-- It does not provide tools for DID rotation/status changes, credential status changes, policy or
-  model publication, or evidence anchoring. Those mutations remain service-side operations outside
-  this plugin's tool surface.
+- It does not manage a wallet, sign on-chain transactions or produce real cryptographic settlement.
+- It does not require or provide a separate control-plane HTTP service.
+- It does not replace the harness: it uses the `tools` and `webServer`/`connection` services and
+  registers through the public plugin API.

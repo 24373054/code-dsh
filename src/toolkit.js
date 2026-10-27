@@ -4,30 +4,29 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
  * Canonical output declaration shared by every tool in this plugin.
  *
  * The canonical value is lossless JSON and is rendered as pretty-printed text
- * so the model can read nested control-plane responses without adaptation.
+ * so the model can read nested trust-engine records without adaptation.
  */
 export const OUTPUT = Object.freeze({
   schema: { type: 'json' },
   render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
 })
 
-/** Marker for results that were produced by the local in-memory sandbox. */
-export const SANDBOX_SOURCE = 'in-memory-sandbox'
-
-/** Marker for results that were produced by a real control-plane call. */
-export const CONTROL_PLANE_SOURCE = 'control-plane'
+/** Marker for results produced by the embedded, in-process trust engine. */
+export const EMBEDDED_SOURCE = 'embedded-engine'
 
 /**
- * Declaration for tools that cannot be answered without a control plane.
+ * Service name under which the plugin provides the embedded trust plane.
  *
- * Registered only in `control-plane` mode, where the plugin itself provides
- * the `trustPlatformClient` service.
+ * Tools and browser routes resolve it lazily so a reloaded engine is picked up
+ * by later calls.
  */
-export const CLIENT_UNAVAILABLE = Object.freeze({
+export const TRUST_PLANE_SERVICE = 'trustPlane'
+
+/** Failure value returned when the embedded trust plane service is missing. */
+export const PLANE_UNAVAILABLE = Object.freeze({
   ok: false,
-  code: 'TRUST_CLIENT_UNAVAILABLE',
-  message:
-    'trustPlatformClient is not available; the plugin must be loaded with mode "control-plane"',
+  code: 'TRUST_PLANE_UNAVAILABLE',
+  message: 'the embedded trust plane is not available; reload the plugin',
   decision: 'DEFER',
 })
 
@@ -58,11 +57,6 @@ export function plainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
 }
 
-/** Time-ordered unique identifier used for local sandbox records. */
-export function uniqueId(prefix) {
-  return `${prefix}-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`
-}
-
 /** Canonical success value: `{ ok: true, ...data }`. */
 export function succeeded(data = {}) {
   return { ok: true, ...data }
@@ -79,51 +73,50 @@ export function failed({ code, message, decision = 'DEFER', ...details }) {
 }
 
 /**
- * Map a client failure (HTTP, transport, timeout, validation) to a tool value.
+ * Map a trust-engine `ServiceError` (or an unexpected error) to a tool value.
  *
- * Codes and messages come from the control plane unchanged; the decision is
- * `UNKNOWN` for missing resources and `DEFER` for everything else.
+ * Codes and messages come from the engine unchanged; the decision is `UNKNOWN`
+ * for missing resources and `DEFER` for everything else, so a failed call can
+ * never be mistaken for an ALLOW.
  */
-export function failureFromControlPlane(error) {
+export function failureFromServiceError(error) {
   const details = {
-    status: typeof error?.status === 'number' ? error.status : 0,
-    request_id: optionalText(error?.requestId) ?? null,
+    status: typeof error?.status === 'number' ? error.status : 500,
     retryable: error?.retryable === true,
     policy_version: optionalText(error?.policyVersion) ?? null,
     evidence_refs: Array.isArray(error?.evidenceRefs) ? error.evidenceRefs : [],
     decision: error?.status === 404 ? 'UNKNOWN' : 'DEFER',
   }
-  if (Array.isArray(error?.details) && error.details.length > 0) {
-    details.validation = error.details
-  }
+  if (error?.details !== undefined) details.details = error.details
   return failed({
-    code: optionalText(error?.code) ?? 'TRUST_CONTROL_PLANE_ERROR',
-    message: optionalText(error?.message) ?? 'control plane request failed',
+    code: optionalText(error?.code) ?? 'TRUST_ENGINE_ERROR',
+    message: optionalText(error?.message) ?? 'trust engine request failed',
     ...details,
   })
 }
 
 /**
- * Define a tool that resolves the control-plane client at execution time.
+ * Define a tool that resolves the embedded trust plane at execution time.
  *
- * The client is looked up lazily through `resolveClient` so a service provided
- * after plugin load (or replaced during a reload) is picked up by later calls.
+ * The plane is looked up lazily through `resolvePlane` so a service provided
+ * later in the same fiber (or replaced during a reload) is picked up by later
+ * calls.
  *
- * @param resolveClient - zero-argument lookup returning the client, or `undefined`.
- * @param definition - tool metadata plus `execute(client, args, exec)`.
+ * @param resolvePlane - zero-argument lookup returning the plane, or `undefined`.
+ * @param definition - tool metadata plus `execute(plane, args, exec)`.
  */
-export function controlPlaneTool(resolveClient, { name, description, parameters, execute }) {
+export function engineTool(resolvePlane, { name, description, parameters, execute }) {
   return definePluginTool({
     name,
     description,
     parameters,
     async execute(args, exec) {
-      const client = resolveClient()
-      if (!client || typeof client.request !== 'function') return CLIENT_UNAVAILABLE
+      const plane = resolvePlane()
+      if (!plane || typeof plane !== 'object') return PLANE_UNAVAILABLE
       try {
-        return await execute(client, args, exec)
+        return await execute(plane, args ?? {}, exec)
       } catch (error) {
-        return failureFromControlPlane(error)
+        return failureFromServiceError(error)
       }
     },
   })

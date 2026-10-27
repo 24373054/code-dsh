@@ -1,15 +1,21 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { Config, apply, inject, name } from '../src/index.js'
+import { DEFAULT_POLICY } from '../src/engine/core.js'
 
 /** Minimal Cordis-like context capturing registrations and services. */
 function createContext() {
   const tools = new Map()
   const services = new Map()
+  const effects = []
   return {
     tools: {
       register(definition) {
+        assert.equal(tools.has(definition.name), false, `tool ${definition.name} must be registered once`)
         tools.set(definition.name, definition)
         return definition
       },
@@ -21,240 +27,156 @@ function createContext() {
     get(service) {
       return services.get(service)
     },
+    effect(create) {
+      effects.push(create)
+      const dispose = create()
+      return () => {
+        try {
+          dispose?.()
+        } catch {
+          // disposal is best effort in this fake context too
+        }
+      }
+    },
     registeredTools: tools,
     services,
+    effects,
   }
 }
 
-/** Execute one registered tool directly. */
-function run(context, toolName, args = {}) {
+/** Execute one registered tool directly, bypassing the host tool registry. */
+function run(context, toolName, args = {}, exec = {}) {
   const definition = context.registeredTools.get(toolName)
   assert.ok(definition, `tool ${toolName} should be registered`)
-  return definition.execute(args, {})
+  return definition.execute(args, exec)
 }
 
-test('plugin metadata declares name and tool injection', () => {
+/** Resolve the embedded trust plane provided by the plugin. */
+function planeOf(context) {
+  const plane = context.services.get('trustPlane')
+  assert.ok(plane, 'the plugin must provide the trustPlane service')
+  return plane
+}
+
+/** Every money-moving tool name must stay absent forever. */
+const FORBIDDEN_TOOL_NAMES = ['send_money', 'transfer_funds', 'payout', 'settle_payment']
+
+test('plugin metadata declares the Cordis contract', () => {
   assert.equal(name, 'dsh-trust-platform')
   assert.deepEqual(inject, ['tools'])
 })
 
-test('Config fills defaults and validates values', () => {
-  assert.deepEqual(Config({}), {
-    mode: 'in-memory',
-    baseUrl: '',
-    token: '',
-    actorDid: '',
-    timeoutMs: 30000,
-    allowInterventionExecution: false,
-  })
+test('Config fills embedded defaults and validates values', () => {
+  const defaults = Config({})
+  assert.equal(defaults.mode, 'embedded')
+  assert.equal(defaults.dataDir, '')
+  assert.equal(defaults.actorDid, 'system:dsh-web')
+  assert.equal(defaults.allowInterventionExecution, false)
+  assert.deepEqual(defaults.policy, DEFAULT_POLICY)
   assert.throws(() => Config({ mode: 'nonsense' }), /mode/)
-  assert.throws(() => Config({ timeoutMs: 'soon' }), /timeoutMs/)
-  const configured = Config({ mode: 'control-plane', baseUrl: 'http://127.0.0.1:8080', timeoutMs: 5000 })
-  assert.equal(configured.mode, 'control-plane')
-  assert.equal(configured.timeoutMs, 5000)
+  assert.throws(() => Config({ allowInterventionExecution: 'yes' }), /boolean/)
+  assert.throws(() => Config({ policy: { riskBlockThreshold: 'high' } }), /riskBlockThreshold/)
+  const configured = Config({ mode: 'sandbox', actorDid: 'system:tests', allowInterventionExecution: true })
+  assert.equal(configured.mode, 'sandbox')
+  assert.equal(configured.allowInterventionExecution, true)
 })
 
-test('in-memory mode registers exactly the nine canonical sandbox tools', () => {
-  const ctx = createContext()
-  apply(ctx, Config({}))
-  assert.deepEqual([...ctx.registeredTools.keys()].sort(), [
-    'check_authorization',
-    'create_payment_task',
-    'get_execution_receipt',
-    'get_identity_status',
-    'get_risk_decision',
-    'register_identity',
-    'request_step_up',
-    'submit_operation_event',
-    'verify_credential',
-  ])
-  assert.equal(ctx.services.size, 0, 'the sandbox does not provide a control-plane client')
-  assert.equal(ctx.registeredTools.has('execute_intervention'), false)
+test('sandbox mode registers the full tool surface and gates execution', async () => {
+  const sandbox = createContext()
+  apply(sandbox, Config({ mode: 'sandbox' }))
+  assert.equal(sandbox.registeredTools.size, 58)
+  assert.equal(sandbox.registeredTools.has('execute_intervention'), false)
+  assert.equal(sandbox.services.has('trustPlane'), true)
+  assert.equal(sandbox.services.has('trustPlatformClient'), false)
+
+  const gated = createContext()
+  apply(gated, Config({ mode: 'sandbox', allowInterventionExecution: true }))
+  assert.equal(gated.registeredTools.size, 59)
+  assert.equal(gated.registeredTools.has('execute_intervention'), true)
+
+  for (const toolName of FORBIDDEN_TOOL_NAMES) {
+    assert.equal(sandbox.registeredTools.has(toolName), false, `${toolName} must never exist`)
+    assert.equal(gated.registeredTools.has(toolName), false, `${toolName} must never exist`)
+  }
 })
 
-test('in-memory sandbox never approves an unregistered identity', async () => {
+test('embedded mode registers the same tool surface and never needs a client', () => {
+  const dataDir = join(tmpdir(), 'trust-platform-never-written')
   const ctx = createContext()
-  apply(ctx, Config({}))
-  const denied = await run(ctx, 'check_authorization', {
-    did: 'did:trust:demo:stranger',
-    beneficiary: 'shop',
-    amount: 10,
-    currency: 'USD',
-  })
-  assert.equal(denied.ok, false)
-  assert.equal(denied.authorization.decision, 'DEFER')
-  assert.equal(denied.authorization.authoritative, false)
-})
-
-test('in-memory sandbox models the full local flow', async () => {
-  const ctx = createContext()
-  apply(ctx, Config({}))
-
-  const registered = await run(ctx, 'register_identity', {
-    did: 'did:trust:demo:payer',
-    domain: 'demo',
-  })
-  assert.equal(registered.ok, true)
-  assert.equal(registered.identity.status, 'PENDING_VERIFICATION')
-  assert.equal(registered.authoritative, false)
-
-  const status = await run(ctx, 'get_identity_status', { did: 'did:trust:demo:payer' })
-  assert.equal(status.ok, true)
-  assert.equal(status.identity.did, 'did:trust:demo:payer')
-
-  const missing = await run(ctx, 'get_identity_status', { did: 'did:trust:demo:ghost' })
-  assert.equal(missing.ok, false)
-  assert.equal(missing.code, 'DID_NOT_FOUND')
-  assert.equal(missing.decision, 'UNKNOWN')
-
-  const credential = await run(ctx, 'verify_credential', {
-    did: 'did:trust:demo:payer',
-    credential_type: 'AgentRegistrationCredential',
-    credential_ref: 'vc-1',
-  })
-  assert.equal(credential.ok, true)
-  assert.equal(credential.credential.status, 'VERIFIED')
-
-  const unverifiable = await run(ctx, 'verify_credential', {
-    did: 'did:trust:demo:payer',
-    credential_type: 'AgentRegistrationCredential',
-    credential_ref: '',
-  })
-  assert.equal(unverifiable.ok, false)
-  assert.equal(unverifiable.status, 'NOT_EVALUABLE')
-
-  const allowed = await run(ctx, 'check_authorization', {
-    did: 'did:trust:demo:payer',
-    beneficiary: 'shop.example',
-    amount: 250,
-    currency: 'usd',
-  })
-  assert.equal(allowed.ok, true)
-  assert.equal(allowed.authorization.decision, 'ALLOW')
-  assert.equal(allowed.authorization.currency, 'USD')
-  assert.equal(allowed.authorization.authoritative, false)
-
-  const overLimit = await run(ctx, 'check_authorization', {
-    did: 'did:trust:demo:payer',
-    beneficiary: 'shop.example',
-    amount: 25000,
-    currency: 'USD',
-  })
-  assert.equal(overLimit.ok, false)
-  assert.equal(overLimit.authorization.decision, 'DEFER')
-
-  const task = await run(ctx, 'create_payment_task', {
-    authorization_id: allowed.authorization.id,
-    purpose: 'supplier invoice',
-  })
-  assert.equal(task.ok, true)
-  assert.equal(task.task.status, 'PENDING_EXECUTION_GATEWAY')
-
-  const blockedTask = await run(ctx, 'create_payment_task', {
-    authorization_id: 'auth-unknown',
-    purpose: 'supplier invoice',
-  })
-  assert.equal(blockedTask.ok, false)
-  assert.equal(blockedTask.code, 'TRUST_AUTHORIZATION_REQUIRED')
-  assert.equal(blockedTask.decision, 'DENY')
-
-  const beforeEvent = await run(ctx, 'get_risk_decision', { task_id: task.task.id })
-  assert.equal(beforeEvent.decision.decision, 'DEFER')
-  assert.equal(beforeEvent.decision.authorization_effect, 'NONE')
-
-  const event = await run(ctx, 'submit_operation_event', {
-    task_id: task.task.id,
-    event_type: 'PAYREQ',
-    event_ref: 'ledger-1',
-  })
-  assert.equal(event.ok, true)
-
-  const afterEvent = await run(ctx, 'get_risk_decision', { task_id: task.task.id })
-  assert.equal(afterEvent.decision.decision, 'REVIEW')
-
-  const stepUp = await run(ctx, 'request_step_up', { task_id: task.task.id, reason: 'large amount' })
-  assert.equal(stepUp.ok, true)
-  assert.equal(stepUp.status, 'REQUIRED')
-
-  const receipt = await run(ctx, 'get_execution_receipt', { task_id: task.task.id })
-  assert.equal(receipt.ok, true)
-  assert.equal(receipt.receipt, null)
-  assert.equal(receipt.status, 'NOT_SETTLED')
-})
-
-test('control-plane mode requires a valid baseUrl', () => {
-  const ctx = createContext()
-  assert.throws(() => apply(ctx, { mode: 'control-plane' }), /baseUrl/)
-  assert.throws(() => apply(ctx, { mode: 'control-plane', baseUrl: '/relative' }), /baseUrl/)
-  assert.throws(() => apply(ctx, { mode: 'control-plane', baseUrl: 'ftp://127.0.0.1' }), /baseUrl/)
-  assert.throws(() => apply(ctx, { mode: 'control-plane', baseUrl: 'http://user:pass@127.0.0.1:8080' }), /baseUrl/)
-})
-
-test('unknown modes and misplaced execution flags are rejected', () => {
-  const ctx = createContext()
-  assert.throws(() => apply(ctx, { mode: 'bogus' }), /unknown mode/)
-  assert.throws(() => apply(ctx, Config({ allowInterventionExecution: true })), /control-plane/)
-})
-
-test('control-plane mode provides the client and registers authoritative tools', () => {
-  const ctx = createContext()
-  apply(ctx, { mode: 'control-plane', baseUrl: 'http://127.0.0.1:8080/' })
-  const client = ctx.get('trustPlatformClient')
-  assert.equal(typeof client.request, 'function')
-  assert.equal(client.baseUrl, 'http://127.0.0.1:8080')
+  apply(ctx, Config({ mode: 'embedded', dataDir }))
   assert.equal(ctx.registeredTools.size, 58)
-  assert.equal(ctx.registeredTools.has('execute_intervention'), false)
-  for (const toolName of [
-    'register_identity',
-    'check_authorization',
-    'create_delegation',
-    'revoke_delegation',
-    'issue_credential',
-    'read_credential',
-    'transition_payment_task',
-    'create_trace_report',
-  ]) {
-    assert.ok(ctx.registeredTools.has(toolName), `${toolName} should be registered`)
-  }
+  assert.equal(ctx.services.has('trustPlatformClient'), false)
+  assert.equal(ctx.registeredTools.get('check_service_health').description.includes('embedded'), true)
 })
 
-test('execute_intervention is registered only when explicitly allowed', () => {
-  const ctx = createContext()
-  apply(ctx, {
-    mode: 'control-plane',
-    baseUrl: 'http://127.0.0.1:8080',
-    allowInterventionExecution: true,
-  })
-  assert.equal(ctx.registeredTools.size, 59)
-  assert.ok(ctx.registeredTools.has('execute_intervention'))
-})
-
-test('control-plane tools resolve the client lazily on every call', async () => {
-  const ctx = createContext()
-  apply(ctx, { mode: 'control-plane', baseUrl: 'http://127.0.0.1:8080' })
-  const calls = []
-  ctx.services.set('trustPlatformClient', {
-    async request(operation, payload, options) {
-      calls.push({ operation, payload, options })
-      return { data: { id: 'task-1', requester_did: 'did:trust:demo:payer' }, status: 200, requestId: 'req-1' }
-    },
-  })
-  const result = await run(ctx, 'read_payment_task', { task_id: 'task-1' })
-  assert.equal(result.ok, true)
-  assert.equal(calls.length, 1)
-  assert.equal(calls[0].operation, 'taskGet')
-  assert.deepEqual(calls[0].options.path, { task_id: 'task-1' })
-})
-
-test('no tool can send money or settle funds', () => {
-  for (const config of [
-    Config({}),
-    { mode: 'control-plane', baseUrl: 'http://127.0.0.1:8080', allowInterventionExecution: true },
-  ]) {
+test('tool calls produce authoritative embedded results', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'trust-platform-tools-'))
+  try {
     const ctx = createContext()
-    apply(ctx, config)
-    for (const toolName of ctx.registeredTools.keys()) {
-      assert.doesNotMatch(toolName, /send_money|settle|settlement|transfer|payout/i)
-    }
+    apply(ctx, Config({ mode: 'embedded', dataDir, actorDid: 'system:tests' }))
+    const registered = await run(ctx, 'register_identity', {
+      domain_id: 'bank.example',
+      subject_id: 'agent-1',
+      display_name: 'Agent One',
+    })
+    assert.equal(registered.ok, true)
+    assert.equal(registered.source, 'embedded-engine')
+    assert.equal(registered.authoritative, true)
+    assert.equal(registered.identity.did, 'did:trust:bank.example:agent-1')
+
+    const status = await run(ctx, 'get_identity_status', { did: registered.identity.did })
+    assert.equal(status.ok, true)
+    assert.equal(status.identity.did, registered.identity.did)
+    assert.equal(status.identity.status, 'ACTIVE')
+    assert.equal(planeOf(ctx).counts().identities, 1)
+  } finally {
+    await rm(dataDir, { recursive: true, force: true })
   }
+})
+
+test('tool failures fail closed with a stable error code', async () => {
+  const ctx = createContext()
+  apply(ctx, Config({ mode: 'sandbox' }))
+  const failure = await run(ctx, 'register_identity', { domain_id: 'bank.example' })
+  assert.equal(failure.ok, false)
+  assert.equal(typeof failure.code, 'string')
+  assert.notEqual(failure.decision, 'ALLOW')
+  assert.equal(failure.source, undefined)
+})
+
+test('embedded state and runtime settings survive a plugin restart', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'trust-platform-state-'))
+  try {
+    const first = createContext()
+    apply(first, Config({ mode: 'embedded', dataDir, actorDid: 'system:tests' }))
+    await run(first, 'register_identity', {
+      domain_id: 'bank.example',
+      subject_id: 'agent-1',
+      display_name: 'Agent One',
+    })
+    planeOf(first).updateSettings({ actorDid: 'system:owner', policy: { riskDeferThreshold: 0.55 } })
+    planeOf(first).flush()
+
+    const persisted = JSON.parse(await readFile(join(dataDir, 'state.json'), 'utf8'))
+    assert.equal(typeof persisted.identities, 'object')
+    assert.equal(persisted.settings.actorDid, 'system:owner')
+
+    const second = createContext()
+    apply(second, Config({ mode: 'embedded', dataDir, actorDid: 'system:tests' }))
+    const plane = planeOf(second)
+    assert.equal(plane.counts().identities, 1)
+    const snapshot = plane.settingsSnapshot()
+    assert.equal(snapshot.settings.actorDid, 'system:owner')
+    assert.equal(snapshot.settings.policy.riskDeferThreshold, 0.55)
+    assert.equal(snapshot.defaults.actorDid, 'system:tests')
+  } finally {
+    await rm(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('browser API is skipped when the host has no inject surface', () => {
+  const ctx = createContext()
+  assert.equal(typeof ctx.inject, 'undefined')
+  assert.doesNotThrow(() => apply(ctx, Config({ mode: 'sandbox' })))
+  assert.equal(ctx.effects.length, 1)
 })

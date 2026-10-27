@@ -1,3 +1,19 @@
+# Trust platform: an embedded identity and payment-trust plane for DSH.
+# Everything runs in-process; there is no sidecar service and no listening port.
+# Every field below is optional - remove the leading '#' to override a default.
 - insert:
     - id: trust-platform-tools
       name: '@sealwax/dsh-trust-platform'
+      # config:
+      #   mode: embedded                     # embedded (persisted) | sandbox (memory only)
+      #   dataDir: ''                        # empty = $DSH_HOME/plugin-data/dsh-trust-platform
+      #   actorDid: system:dsh-web           # also editable in Settings -> Trust platform
+      #   allowInterventionExecution: false  # records receipts only, never moves funds
+      #   policy:                            # also editable in Settings -> Trust platform
+      #     policyVersion: policy-2026-10-25-001
+      #     singleAmountLimit: 1000000
+      #     dailyAmountLimit: 5000000
+      #     riskBlockThreshold: 0.8
+      #     riskDeferThreshold: 0.6
+      #     riskThrottleThreshold: 0.4
+      #     defaultTrustScore: 0.95

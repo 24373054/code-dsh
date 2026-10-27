@@ -1,169 +1,164 @@
 /**
- * Shared plugin state for the Host half.
+ * Browser-facing snapshots built from the embedded trust plane.
  *
- * Tools previously kept their caches inside factory closures, which made it
- * impossible to show a consolidated view in the browser. The state objects are
- * created once by `apply` and passed to every tool factory, so the UI route can
- * read the same records the tools write.
- *
- * The caches are never authoritative: in control-plane mode they only remember
- * identifiers and decisions returned by the service so the browser can render a
- * recent-activity overview.
+ * The client bundle polls one read-only JSON document. Everything in it is
+ * derived from the engine state owned by this plugin process: no sidecar
+ * service, no network, no optimistic counters.
  *
  * @module dsh-trust-platform/state
  */
 
-/** How many recent operation events the overview exposes. */
-const RECENT_EVENT_LIMIT = 10
+/** Public package id shown in the browser half. */
+export const PLUGIN_ID = '@sealwax/dsh-trust-platform'
 
-/** How many operation events the in-memory cache keeps. */
-const EVENT_CACHE_LIMIT = 50
+/** Where the records came from: the in-process embedded engine. */
+export const EMBEDDED_SOURCE = 'embedded-engine'
 
-/**
- * Create the state container used by the in-memory sandbox.
- *
- * @returns state with Maps for identities, credentials, authorizations, tasks
- *   and execution receipts plus an array of operation events.
- */
-export function createSandboxState() {
-  return {
-    identities: new Map(),
-    credentials: new Map(),
-    authorizations: new Map(),
-    tasks: new Map(),
-    events: [],
-    executions: new Map(),
-  }
-}
+/** How many recent audit entries are exposed to the browser. */
+export const RECENT_EVENT_LIMIT = 10
 
 /**
- * Create the state container used in control-plane mode.
+ * Build the overview document served at `GET /trust-platform/api/overview`.
  *
- * Only server-returned identifiers are cached here; the caches never substitute
- * for control-plane reads.
- *
- * @returns state with Maps for identities, credentials, authorizations, tasks
- *   and execution receipts plus an array of observed operation events.
- */
-export function createControlPlaneState() {
-  return {
-    identities: new Map(),
-    credentials: new Map(),
-    authorizations: new Map(),
-    tasks: new Map(),
-    events: [],
-    executions: new Map(),
-  }
-}
-
-/**
- * Append an operation event to the bounded cache used by the overview.
- *
- * @param state - state container created by either factory above.
- * @param event - raw event record from a tool result.
- */
-export function cacheEvent(state, event) {
-  if (!state || !Array.isArray(state.events) || event === null || typeof event !== 'object') return
-  state.events.push({
-    event_type: typeof event.event_type === 'string' ? event.event_type : 'UNKNOWN',
-    actor_did: typeof event.actor_did === 'string' ? event.actor_did : null,
-    task_id: typeof event.task_id === 'string' ? event.task_id : null,
-    occurred_at:
-      typeof event.occurred_at === 'string'
-        ? event.occurred_at
-        : typeof event.observed_at === 'string'
-          ? event.observed_at
-          : typeof event.created_at === 'string'
-            ? event.created_at
-            : null,
-    decision: typeof event.decision === 'string' ? event.decision : null,
-  })
-  if (state.events.length > EVENT_CACHE_LIMIT) state.events.splice(0, state.events.length - EVENT_CACHE_LIMIT)
-}
-
-/**
- * Build the JSON-safe overview rendered by the browser half.
- *
- * @param options.mode - active plugin mode.
+ * @param options.plane - embedded trust plane (`createTrustPlane` result).
  * @param options.version - plugin package version.
- * @param options.state - state container.
- * @param options.startedAt - ISO timestamp captured when the plugin applied.
- * @param options.health - health snapshot; control-plane mode probes the service.
- * @param options.config - non-secret plugin configuration for display.
- * @param options.now - clock override for tests.
- * @returns a plain object matching the browser overview contract.
+ * @param options.mode - `embedded` or `sandbox`.
+ * @param options.startedAt - ISO timestamp of plugin start.
+ * @param options.health - health snapshot; defaults to the engine health.
+ * @param options.config - public (non-secret) configuration summary.
+ * @param options.now - current time (injectable for tests).
  */
-export function buildOverview({ mode, version, state, startedAt, health, config, now = new Date() }) {
-  const container = state ?? createSandboxState()
-  const events = Array.isArray(container.events) ? container.events : []
-  const authoritative = mode === 'control-plane'
-  const recent = events.slice(-RECENT_EVENT_LIMIT).reverse()
+export function buildOverview({ plane, version, mode, startedAt, health, config, authoritative, now = new Date() } = {}) {
+  const engine = plane?.engine
+  const resolvedMode = normalizeMode(mode)
+  const resolvedHealth = normalizeHealth(health ?? plane?.health?.())
+  const counts = typeof plane?.counts === 'function' ? plane.counts() : emptyCounts()
   return {
     plugin: {
-      name: '@sealwax/dsh-trust-platform',
-      version: typeof version === 'string' && version !== '' ? version : '0.0.0',
-      mode,
-      source: authoritative ? 'control-plane' : 'in-memory-sandbox',
-      authoritative,
-      started_at: typeof startedAt === 'string' ? startedAt : null,
-      config: publicConfig(config),
+      name: PLUGIN_ID,
+      version: normalizeVersion(version),
+      mode: resolvedMode,
+      engine: 'embedded',
+      source: resolvedMode === 'sandbox' ? 'in-memory-sandbox' : EMBEDDED_SOURCE,
+      authoritative: authoritative === undefined ? resolvedMode === 'embedded' : Boolean(authoritative),
+      started_at: normalizeIso(startedAt) ?? resolvedHealth.checked_at ?? null,
+      data_dir: normalizeText(engine?.store?.dataDir) || null,
     },
-    health: normalizeHealth(health),
-    counts: {
-      identities: sizeOf(container.identities),
-      credentials: sizeOf(container.credentials),
-      authorizations: sizeOf(container.authorizations),
-      tasks: sizeOf(container.tasks),
-      events: events.length,
-      receipts: sizeOf(container.executions),
-    },
-    recent_events: recent.map((event) => ({
-      event_type: event.event_type ?? 'UNKNOWN',
-      actor_did: event.actor_did ?? null,
-      task_id: event.task_id ?? null,
-      occurred_at: event.occurred_at ?? event.observed_at ?? null,
-      decision: event.decision ?? null,
-    })),
-    now: now instanceof Date ? now.toISOString() : String(now),
+    health: resolvedHealth,
+    config: normalizeConfig(config),
+    counts: normalizeCounts(counts),
+    recent_events: recentEvents(plane),
+    now: toIsoString(now),
   }
 }
 
-/**
- * Reduce plugin configuration to display-safe fields.
- *
- * The bearer token is never included: the overview only reports whether one is
- * configured, so the browser can render settings without holding a secret.
- *
- * @param config - non-secret settings supplied by `apply`.
- * @returns display-safe configuration block.
- */
-function publicConfig(config) {
-  const source = config !== null && typeof config === 'object' ? config : {}
-  return {
-    base_url: typeof source.baseUrl === 'string' ? source.baseUrl : '',
-    actor_did: typeof source.actorDid === 'string' ? source.actorDid : '',
-    timeout_ms: Number.isFinite(source.timeoutMs) ? source.timeoutMs : 0,
-    allow_intervention_execution: source.allowInterventionExecution === true,
-    token_configured: source.tokenConfigured === true,
+/** Latest audit entries shaped for the browser timeline. */
+function recentEvents(plane) {
+  let entries = []
+  try {
+    entries = typeof plane?.activity === 'function' ? plane.activity(RECENT_EVENT_LIMIT) : []
+  } catch {
+    entries = []
   }
+  if (!Array.isArray(entries)) return []
+  return entries.slice(0, RECENT_EVENT_LIMIT).map((entry) => {
+    const details = entry?.details && typeof entry.details === 'object' ? entry.details : {}
+    return {
+      event_type: normalizeText(entry?.action) || 'activity',
+      actor_did: normalizeText(entry?.actor) || null,
+      task_id: normalizeText(entry?.resource_type) === 'task' ? normalizeText(entry?.resource_id) || null : null,
+      occurred_at: normalizeIso(entry?.created_at),
+      decision: normalizeText(details.decision) || null,
+    }
+  })
 }
 
-/** Keep only shape-stable health fields so the browser never renders raw errors. */
+/** Health document restricted to the fields the browser half understands. */
 function normalizeHealth(health) {
-  if (health === null || typeof health !== 'object') return { status: 'unknown' }
-  const status = typeof health.status === 'string' ? health.status : 'unknown'
-  const snapshot = { status }
-  if (typeof health.service === 'string') snapshot.service = health.service
-  if (typeof health.environment === 'string') snapshot.environment = health.environment
-  if (typeof health.schema_revision === 'string') snapshot.schema_revision = health.schema_revision
-  if (typeof health.error_code === 'string') snapshot.error_code = health.error_code
-  if (typeof health.checked_at === 'string') snapshot.checked_at = health.checked_at
-  return snapshot
+  const value = health !== null && typeof health === 'object' ? health : {}
+  const normalized = {
+    status: normalizeText(value.status) || 'ok',
+    service: normalizeText(value.service) || 'dsh-embedded-trust-plane',
+    engine: normalizeText(value.engine) || 'embedded',
+    mode: normalizeText(value.mode) || null,
+    schema_revision: normalizeText(value.schema_revision) || null,
+    started_at: normalizeIso(value.started_at),
+    checked_at: normalizeIso(value.checked_at) ?? toIsoString(new Date()),
+  }
+  if (typeof value.error_code === 'string' && value.error_code !== '') normalized.error_code = value.error_code
+  return normalized
 }
 
-/** Read Map or Array sizes without trusting the container shape. */
-function sizeOf(collection) {
-  if (collection instanceof Map) return collection.size
-  if (Array.isArray(collection)) return collection.length
-  return 0
+/** Public configuration summary; never contains secrets. */
+function normalizeConfig(config) {
+  const value = config !== null && typeof config === 'object' ? config : {}
+  return {
+    mode: normalizeMode(value.mode),
+    data_dir: normalizeText(value.data_dir) || normalizeText(value.dataDir) || null,
+    actor_did: normalizeText(value.actor_did) || normalizeText(value.actorDid) || null,
+    allow_intervention_execution: value.allow_intervention_execution === true || value.allowInterventionExecution === true,
+    policy: normalizePolicy(value.policy),
+  }
+}
+
+/** Policy block of the public configuration. */
+export function normalizePolicy(policy) {
+  const value = policy !== null && typeof policy === 'object' ? policy : {}
+  return {
+    policy_version: normalizeText(value.policyVersion) || normalizeText(value.policy_version) || null,
+    single_amount_limit: numberOrNull(value.singleAmountLimit ?? value.single_amount_limit),
+    daily_amount_limit: numberOrNull(value.dailyAmountLimit ?? value.daily_amount_limit),
+    risk_block_threshold: numberOrNull(value.riskBlockThreshold ?? value.risk_block_threshold),
+    risk_defer_threshold: numberOrNull(value.riskDeferThreshold ?? value.risk_defer_threshold),
+    risk_throttle_threshold: numberOrNull(value.riskThrottleThreshold ?? value.risk_throttle_threshold),
+    default_trust_score: numberOrNull(value.defaultTrustScore ?? value.default_trust_score),
+  }
+}
+
+/** Six record counters shown by the browser. */
+function normalizeCounts(counts) {
+  const value = counts !== null && typeof counts === 'object' ? counts : {}
+  return {
+    identities: countOf(value.identities),
+    credentials: countOf(value.credentials),
+    authorizations: countOf(value.authorizations),
+    tasks: countOf(value.tasks),
+    events: countOf(value.events),
+    receipts: countOf(value.receipts),
+  }
+}
+
+function emptyCounts() {
+  return { identities: 0, credentials: 0, authorizations: 0, tasks: 0, events: 0, receipts: 0 }
+}
+
+function countOf(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0
+}
+
+function numberOrNull(value) {
+  const number = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function normalizeVersion(version) {
+  return normalizeText(version) || '0.0.0'
+}
+
+function normalizeMode(mode) {
+  return normalizeText(mode) || 'embedded'
+}
+
+function normalizeText(value) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function normalizeIso(value) {
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString()
+  const text = normalizeText(value)
+  return text === '' ? null : text
+}
+
+function toIsoString(value) {
+  return normalizeIso(value) ?? new Date().toISOString()
 }

@@ -1,12 +1,11 @@
 # DSH Trust Platform Plugin
 
-DeepSeek Harness bundle plugin exposing identity, delegation and payment-governance tools for
-agent payment workflows. It runs in one of two modes:
+DeepSeek Harness bundle plugin exposing identity, delegation and payment-governance tools for agent
+payment workflows. The whole trust plane runs **inside the plugin process**: there is no external
+control-plane service, no HTTP backend to deploy, and no `baseUrl` or bearer token to configure.
 
-- **In-memory sandbox** (default): nine local tools with no network and no persistence. Decisions are
-  illustrative and **not authoritative**.
-- **Control plane**: the same nine tool names backed by a real trust control-plane HTTP service, plus
-  the remote read/decision tools the service exposes. Decisions come from that service.
+The embedded engine keeps its records in a profile-owned data directory and runs deterministically
+offline. A sandbox mode uses an in-memory store for experiments; it is explicitly non-authoritative.
 
 The plugin never sends money or settles value in either mode.
 
@@ -27,59 +26,97 @@ A local checkout can be linked the same way with `dsh plugin --profile demo add 
 
 ## Configuration
 
-Configuration lives in the profile `cordis.patch.yml`. The defaults load the sandbox:
-
-```yaml
-- id: trust-platform-tools
-  config:
-    mode: control-plane
-    baseUrl: http://127.0.0.1:8080
-    actorDid: system:console
-    timeoutMs: 30000
-    allowInterventionExecution: false
-```
-
-| Field | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `mode` | `in-memory` \| `control-plane` | `in-memory` | Backing implementation of the nine canonical tools. |
-| `baseUrl` | string | `''` | Control-plane origin, required in `control-plane` mode; must be an absolute `http(s)` URL without embedded credentials. |
-| `token` | secret string | `''` | Bearer token sent as `Authorization`. Secret-role config; never logged. |
-| `actorDid` | string | `''` | Actor DID sent as `X-Actor-DID`; defaults to the token subject on the service side. |
-| `timeoutMs` | number | `30000` | Per-request timeout for control-plane calls. |
-| `allowInterventionExecution` | boolean | `false` | Registers `execute_intervention`, which applies a control-plane intervention decision. Control-plane mode only. |
+The profile row keeps host-side settings only. Runtime trust settings — actor DID, intervention gate,
+policy version, amount limits, risk thresholds and the default trust score — are edited in the Web
+GUI: **Settings → Trust Platform** (see [Settings panel](#settings-panel)). The embedded engine owns
+its data directory, so the profile does not configure a control-plane address or token.
 
 Invalid configuration fails plugin load with an actionable error instead of falling back to unsafe
-defaults. See [Plugin configuration](docs/plugin-configuration.md) for the full reference, deployment
-examples, validation errors and security semantics.
+defaults. See [Plugin configuration](docs/plugin-configuration.md) for the host configuration
+reference.
 
-## Tools by mode
+## Tools
 
-**In-memory sandbox (9):** `register_identity`, `get_identity_status`, `verify_credential`,
-`check_authorization`, `create_payment_task`, `submit_operation_event`, `get_risk_decision`,
-`request_step_up`, `get_execution_receipt`.
+The host half registers the identity and payment-governance tools of the embedded engine under the
+same names the plugin has always used (`register_identity`, `get_identity_status`,
+`verify_credential`, `check_authorization`, `create_payment_task`, `get_risk_decision`,
+`verify_operation_event`, `get_execution_receipt`, …). `execute_intervention` appears only when the
+intervention gate is enabled in the settings panel.
 
-**Control plane (58):** the same nine canonical tools, backed by the service, plus 27 adapter tools and
-22 full-surface tools:
+In the conversation, eight governed calls render as compact trust cards: a localized title, a status
+badge, the result's `decision` badge when present, a one-line code/message summary and a raw-JSON
+disclosure. Unrecognized payloads degrade to the raw text instead of throwing.
 
-- Remote reads and decisions (21): `check_service_health`, `resolve_identity_admission`,
-  `verify_remote_credential`, `read_payment_task`, `list_payment_tasks`, `read_delegation`,
-  `list_delegations`, `verify_operation_event`, `evaluate_remote_risk`, `read_risk_evidence`,
-  `propose_intervention`, `read_interventions`, `read_trace_context`, `search_trust_knowledge`,
-  `read_evidence`, `ingest_evidence`, `create_trace_case`, `read_report`,
-  `submit_governance_feedback`, `read_dashboard_summary`, `query_audit_assistant`.
-- Lifecycle helpers (6): `create_delegation`, `revoke_delegation`, `issue_credential`,
-  `read_credential`, `transition_payment_task`, `create_trace_report`.
+## Browser UI
 
-- Full control-plane surface (22): `list_identities`, `get_identity_keys`, `rotate_identity_keys`,
-  `set_identity_status`, `read_credential_status`, `set_credential_status`, `query_operation_events`,
-  `read_operation_event`, `anchor_evidence`, `read_evidence_anchors`, `list_trace_cases`,
-  `read_trace_case`, `read_case_trace`, `list_case_reports`, `list_governance_policies`,
-  `publish_governance_policy`, `list_governance_models`, `publish_governance_model`,
-  `ingest_knowledge_document`, `publish_knowledge_document`, `read_knowledge_document`,
-  `read_metrics`.
+The DSH Web GUI loads the prebuilt `lib/client.js` bundle lazily. The package declares `dsh.client`
+(`platform: web`) and ships the bundle, so `dsh plugin add` activates it without a build step. The
+bundle is a lazy CommonJS factory (`window.__ModuleLoader__.load`) whose only bare imports are shell
+baseline modules (`react`, `react/jsx-runtime`).
 
-With `allowInterventionExecution: true` the control-plane mode registers 59 tools: the 58 above plus
-`execute_intervention`.
+- **Tool renderers** for the eight governed calls listed above, keyed in `tool.call.toolview`.
+- **Plugin overview panel** in Settings → Plugins → DSH Trust Platform: engine mode (`embedded` /
+  `sandbox`), source and authoritative flags, health status, the six entity counters (identities,
+  credentials, authorizations, tasks, events, receipts) and the ten most recent events. It polls the
+  same-origin route `GET /trust-platform/api/overview` every 5 seconds and keeps the last good
+  snapshot if a refresh fails.
+- **Package badge** showing the active trust-platform package version.
+- **Settings panel** in Settings → Trust Platform: a live status header (mode, data directory,
+  health, schema revision, start time) and an editable form for the actor DID, the
+  intervention-execution gate and the policy limits. The page polls `GET /trust-platform/api/settings`
+  and `GET /trust-platform/api/health` every 10 seconds while mounted, keeps unsaved edits on screen
+  across refreshes, and renders the Host's `422` validation message instead of discarding the form.
+  A danger zone resets all trust data behind a two-step confirmation; runtime settings are kept.
+
+### Settings panel
+
+| Control | Field | Notes |
+| --- | --- | --- |
+| Actor DID | `actorDid` | 3–200 characters; default actor for engine calls. |
+| Intervention gate | `allowInterventionExecution` | Enables `execute_intervention`; off by default. |
+| Policy version | `policyVersion` | 3–120 characters. |
+| Amount limits | `singleAmountLimit`, `dailyAmountLimit` | Positive amounts up to 1,000,000,000,000. |
+| Risk thresholds | `riskBlockThreshold`, `riskDeferThreshold`, `riskThrottleThreshold` | Numbers between 0 and 1; block ≥ defer ≥ throttle. |
+| Default trust score | `defaultTrustScore` | Number between 0 and 1. |
+
+Save sends only changed fields (`PUT /trust-platform/api/settings`); apply defaults fills the form
+from the engine's startup policy; reset deletes engine records (`POST /trust-platform/api/reset`,
+body `{ "confirm": true }`) and keeps the runtime settings. All routes are same-origin, use the GUI
+session and are rendered as localized, retryable states on `403`, `404`, `422`, `500`, invalid JSON
+or network failure. The browser half sends no telemetry and no data leaves the DSH origin.
+
+### Localized plugin metadata
+
+`locale/en.json` and `locale/zh.json` describe the plugin for the harness plugin manager:
+`meta.title`, `meta.description` and `meta.detail`, where the detail page is
+[docs/DETAIL.md](docs/DETAIL.md) for English and [docs/DETAIL.zh.md](docs/DETAIL.zh.md) for Chinese.
+Both dictionaries ship in the package and are selected by the harness language chain.
+
+The bundle is committed at `lib/client.js` and rebuilt from source with esbuild:
+
+```sh
+npm run build:client   # src/client/index.jsx -> lib/client.js (lazy-CJS wrapper, size check)
+```
+
+`src/client/` holds the source: `index.jsx` (registrations), `toolviews.jsx`, `overview.jsx`,
+`settings.jsx`, `settings-data.js` (transport, patch and validation model), `settings-store.js`
+(polling hook), `overview-data.js` (shared overview transport), `locales.js` (zh/en dictionaries),
+`format.js` (payload parsing) and `styles.js` (inline styles using DSH design-token CSS variables
+with fallbacks). `tests/client-bundle.test.js` builds the bundle, executes it in a `node:vm` sandbox
+with stubbed baseline modules and the `fetch` stub, and asserts the registered slots, the settings
+form markers, the locale metadata, the module envelope and the absence of non-baseline imports —
+offline and without a browser.
+
+## Package exports
+
+- `@sealwax/dsh-trust-platform` — the host half the profile composes.
+- `@sealwax/dsh-trust-platform/client` — the prebuilt browser bundle (`lib/client.js`).
+- `@sealwax/dsh-trust-platform/cordis.patch.yml` — the bundle patch.
+- `@sealwax/dsh-trust-platform/locale/*.json` — the localized plugin metadata.
+- `@sealwax/dsh-trust-platform/package.json` — package metadata.
+
+Since 0.6.0 the trust plane runs entirely in-process; the legacy `./control-plane-client` subpath
+export of the external-service adapter has been removed.
 
 ## Safety invariants
 
@@ -89,76 +126,15 @@ With `allowInterventionExecution: true` the control-plane mode registers 59 tool
   status, validity window, delegated action, subject binding, amount/daily limits, asset scope and —
   when the task is supplied — root issuer. Missing or unreadable data yields `DEFER`, never `ALLOW`.
 - A risk decision never grants payment authorization: `get_risk_decision` reports
-  `authorization_effect: "NONE"`, and `evaluate_remote_risk` is a read of the service decision only.
+  `authorization_effect: "NONE"`.
 - `verify_operation_event` with an unsigned/unverified event reports `UNKNOWN`, never `VALID`.
 - Warning-level or step-up decisions do not pass as approvals; only an explicit `ALLOW` authorization
   can be used by `create_payment_task`.
 - `execute_intervention` is absent unless `allowInterventionExecution` is explicitly enabled, and it
-  applies a service decision rather than moving funds itself.
-- The client only knows a frozen map of fixed routes; callers cannot request arbitrary URLs.
-- In-memory results carry `source: "in-memory-sandbox"` and `authoritative: false`; control-plane
-  results carry `source: "control-plane"` and `authoritative: true`.
-
-## Client export
-
-`@sealwax/dsh-trust-platform/control-plane-client` exports the fixed-route HTTP adapter used in
-control-plane mode:
-`createControlPlaneClient`, `ROUTES`, `ControlPlaneError` and `validateBaseUrl`. It maps the service's
-flat error body (`error_code`, `message`, `request_id`, `retryable`, `evidence_refs`,
-`policy_version`), sends `X-Request-ID`, optional `X-Actor-DID`/`Authorization`, generates
-`Idempotency-Key` on writes that need one, supports GET query parameters and enforces per-request
-timeouts. In control-plane mode the plugin provides it as the `trustPlatformClient` service. Since
-0.3.0 the `./client` subpath resolves to the browser bundle described below; importing the HTTP
-adapter from Node code now uses the explicit `./control-plane-client` subpath.
-
-## Browser UI
-
-Version 0.3.0 added the first browser half, and 0.4.0 completes it with a read-only settings page; the
-package now publishes as `@sealwax/dsh-trust-platform`. Version 0.5.0 declares the harness packages
-(`@deepseek-ai/dsh-tools`, `@deepseek-ai/schemastery`, `@deepseek-ai/cordis`) as peer dependencies so
-a profile never installs a second copy that shadows the harness services (`0.4.0` is deprecated for
-that reason) and adds 22 full-surface control-plane tools. The DSH Web GUI loads the bundle lazily. Installation is unchanged: the
-package declares `dsh.client` (`platform: web`) and ships the prebuilt bundle at `lib/client.js`, so
-`dsh plugin add` activates it without a build step. The bundle is a lazy CommonJS factory
-(`window.__ModuleLoader__.load`) whose only bare imports are shell baseline modules (`react`,
-`react/jsx-runtime`).
-
-The browser half provides:
-
-- **Tool renderers** in the conversation for eight governed calls: `register_identity`,
-  `get_identity_status`, `verify_credential`, `check_authorization`, `create_payment_task`,
-  `get_risk_decision`, `verify_operation_event` and `get_execution_receipt`. Each renders as a
-  compact card with a localized title, a status badge (`ok` / `failed` / `running`), the tool's
-  `decision` badge when present (`ALLOW`, `DENY`, `DEFER`, `STEP_UP`, …), a one-line code/message
-  summary and a disclosure toggle for the raw JSON result. Unrecognized payloads degrade to the raw
-  text instead of throwing.
-- **Plugin overview panel** in Settings → Plugins → DSH Trust Platform: mode (`control-plane` /
-  `in-memory`), source and authoritative flags, control-plane health, the six entity counters
-  (identities, credentials, authorizations, tasks, events, receipts) and the ten most recent events.
-  It polls the same-origin route `GET /trust-platform/api/overview` every 5 seconds while mounted and
-  keeps the last good snapshot if a refresh fails.
-- **Package badge** showing the version of the active trust-platform package.
-- **Settings page** in Settings → Trust Platform: mode and authority badges, control-plane health, the
-  effective read-only configuration (`base_url`, `actor_did`, `timeout_ms`,
-  `allow_intervention_execution`, and whether a token is configured — never the token value), the six
-  entity counters, and a note naming the exact `cordis.patch.yml` config keys to edit. It polls the
-  overview route every 10 seconds and reuses the same localized error handling.
-
-The overview route is served by the plugin's host half and uses the GUI session; a `403`, `500` or
-network error is rendered as a localized, retryable message instead of a broken panel. The browser
-half sends no telemetry and no data leaves the DSH origin.
-
-The bundle is committed at `lib/client.js` and rebuilt from source with esbuild:
-
-```sh
-npm run build:client   # src/client/index.jsx -> lib/client.js (lazy-CJS wrapper, size check)
-```
-
-`src/client/` holds the source: `index.jsx` (registrations), `toolviews.jsx`, `overview.jsx`,
-`locales.js` (zh/en dictionaries), `format.js` (payload parsing) and `styles.js` (inline styles using
-DSH design-token CSS variables with fallbacks). `tests/client-bundle.test.js` builds the bundle,
-executes it in a `node:vm` sandbox with stubbed baseline modules and asserts the registered slots,
-the module envelope and the absence of non-baseline imports — offline and without a browser.
+  applies an intervention decision rather than moving funds itself.
+- The browser half only knows the fixed same-origin routes; callers cannot request arbitrary URLs.
+- The embedded engine marks its results authoritative; sandbox results are explicitly non-authoritative
+  and unknown or unreadable data never yields `ALLOW`.
 
 ## Development
 
@@ -169,5 +145,5 @@ npm run pack:check   # rebuild the browser bundle, then npm pack --dry-run
 ```
 
 The tests never use the network or a live server; the bundle test rebuilds `lib/client.js` first so
-the committed artifact and the source cannot drift. A separate integration harness can exercise the
-real service. Requires DSH `>=0.2.1-rc.3 <0.3.0` (`engines.dsh`) and `@deepseek-ai/cordis ~4.0.5`.
+the committed artifact and the source cannot drift. Requires DSH `>=0.2.1-rc.3 <0.3.0`
+(`engines.dsh`) and `@deepseek-ai/cordis ~4.0.5`.

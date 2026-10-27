@@ -1,215 +1,465 @@
 /**
- * `settings.section` page for the trust platform.
+ * Editable settings page for the embedded trust plane.
  *
- * One read-only page under DSH Settings: the plugin's live status (mode,
- * authority, data source, health, record counts) plus the display-safe
- * configuration the Host reports. Nothing here writes configuration — the
- * values live in the DSH profile's `cordis.patch.yml`, and the page names the
- * exact keys instead of offering an editor.
+ * The page is a `settings.section` list entry: a single page under Settings that
+ * reads the engine's runtime settings and lets the operator change the actor
+ * DID, the intervention-execution gate and the risk policy limits. Saving sends
+ * only the changed fields; the host validates the patch and a rejected change
+ * renders its message (and details) instead of discarding the form.
  *
- * The snapshot comes from the same same-origin route as the plugin-manager
- * panel, polled every ten seconds while the page is mounted. A 403, a 500, a
- * missing route, or a transport failure renders a localized error strip and
- * keeps the last good snapshot on screen.
+ * The page polls the same-origin settings and health routes every ten seconds,
+ * keeps the last good snapshot across failed refreshes, and leaves a dirty
+ * draft untouched while the operator edits. Destructive data reset needs an
+ * explicit second click. All visible copy comes from the locale dictionaries.
  */
+import { useEffect, useState } from 'react'
 import { Badge } from './badge.jsx'
-import { COUNT_KEYS, formatTime, readConfig, translate } from './format.js'
-import { describeError, useOverview } from './overview-data.js'
+import { formatTime, hasCopy, translate } from './format.js'
+import { describeError } from './overview-data.js'
+import {
+  MAX_AMOUNT,
+  POLICY_NUMBER_FIELDS,
+  buildSettingsPatch,
+  createDraft,
+  describeDetails,
+  resetEngineData,
+  saveSettings,
+  totalCount,
+  validateDraft
+} from './settings-data.js'
+import { useSettings } from './settings-store.js'
 import * as styles from './styles.js'
 
-/** The settings page is read-mostly; ten seconds is fresh enough. */
-const SETTINGS_POLL_INTERVAL_MS = 10000
+/** Poll cadence while the settings page is mounted. */
+const POLL_INTERVAL_MS = 10000
 
-/**
- * Read one finite counter, tolerating a partially shaped payload.
- *
- * @param {unknown} counts
- * @param {string} key
- */
-function countText(counts, key) {
-  if (!counts || typeof counts !== 'object') return '—'
-  const value = counts[key]
-  return typeof value === 'number' && Number.isFinite(value) ? String(value) : '—'
+/** Policy fields the engine treats as money amounts instead of ratios. */
+const AMOUNT_FIELDS = new Set(['singleAmountLimit', 'dailyAmountLimit'])
+
+/** Status tone for a mode value reported by the host. */
+function modeTone(mode) {
+  if (mode === 'embedded' || mode === 'control-plane') return 'ok'
+  if (mode === 'sandbox' || mode === 'in-memory') return 'info'
+  return 'neutral'
 }
 
-/**
- * Localized mode name for the status row; unknown protocol values stay raw.
- *
- * @param {string | null} mode
- * @param {((key: string) => string) | undefined} t
- */
-function modeText(mode, t) {
-  if (mode === 'control-plane') return translate(t, 'overview.mode.control-plane')
-  if (mode === 'in-memory') return translate(t, 'overview.mode.in-memory')
-  return translate(t, 'overview.mode.unknown')
+/** Whether a non-policy control may be edited. */
+function canEdit(editable, field) {
+  return !editable || editable[field] !== false
 }
 
-/**
- * Host health status. The in-memory sandbox reports `sandbox`; the
- * control-plane snapshot reports the service's own status when reachable and
- * `unknown` when it is not.
- *
- * @param {{ status?: unknown } | null} health
- * @param {string | null} mode
- * @param {((key: string) => string) | undefined} t
- */
-function healthText(health, mode, t) {
-  if (health && typeof health.status === 'string' && health.status) return health.status
-  if (mode === 'in-memory') return translate(t, 'settings.health.sandbox')
-  return translate(t, 'settings.health.unknown')
+/** Whether a policy control may be edited. */
+function canEditPolicy(editable, field) {
+  return !editable || !editable.policy || editable.policy[field] !== false
 }
 
-/**
- * Localized yes/no for a boolean configuration flag; unknown stays a dash.
- *
- * @param {boolean | null} value
- * @param {((key: string) => string) | undefined} t
- */
-function flagText(value, t) {
-  if (value === true) return translate(t, 'settings.value.yes')
-  if (value === false) return translate(t, 'settings.value.no')
-  return translate(t, 'settings.value.none')
+/** Merge a base style with the disabled look when a control is locked. */
+function controlStyle(base, locked) {
+  return locked ? { ...base, ...styles.inputDisabled } : base
 }
 
-/**
- * Read-only configuration rows. Only documented fields are projected; the
- * token itself is never part of the snapshot.
- *
- * @param {Record<string, unknown> | null} plugin
- * @param {((key: string, params?: Record<string, unknown>) => string) | undefined} t
- */
-function configRows(plugin, t) {
-  const config = readConfig(plugin)
-  if (!config) return null
-  return [
-    {
-      key: 'settings.config.baseUrl',
-      value: config.baseUrl || translate(t, 'settings.value.none')
-    },
-    {
-      key: 'settings.config.actorDid',
-      value: config.actorDid || translate(t, 'settings.value.default')
-    },
-    {
-      key: 'settings.config.timeoutMs',
-      value: config.timeoutMs === null
-        ? translate(t, 'settings.value.none')
-        : translate(t, 'settings.value.timeout', { ms: config.timeoutMs })
-    },
-    {
-      key: 'settings.config.allowInterventionExecution',
-      value: flagText(config.allowInterventionExecution, t)
-    },
-    {
-      key: 'settings.config.tokenConfigured',
-      value: flagText(config.tokenConfigured, t)
-    }
-  ]
+/** Merge a base style with the disabled look when an action is unavailable. */
+function actionStyle(base, disabled) {
+  return disabled ? { ...base, ...styles.buttonDisabled } : base
 }
 
 /**
  * `settings.section` entry: the trust-platform settings page.
  *
- * The shell passes the shell-owned `close` affordance and this entry's
- * locale-bound `t`; neither is required for the read-only page.
- *
  * @param {{
  *   t?: (key: string, params?: Record<string, unknown>) => string,
  *   close?: () => void,
- * }} props
+ * }} props framework-bound translate seat; `close` is unused (the page is not modal).
  */
 export function SettingsPanel(props) {
   const { t } = props || {}
-  const [state, reload] = useOverview(SETTINGS_POLL_INTERVAL_MS)
-  const { data, error, loading, refreshedAt } = state
+  const [snapshot, reload] = useSettings(POLL_INTERVAL_MS)
+  const { data, health, error, refreshedAt } = snapshot
 
-  const plugin = data && data.plugin && typeof data.plugin === 'object' ? data.plugin : null
-  const counts = data && data.counts && typeof data.counts === 'object' ? data.counts : null
-  const health = data && data.health && typeof data.health === 'object' ? data.health : null
+  const server = data ? data.settings : null
+  const defaults = data ? data.defaults : null
+  const editable = data ? data.editable : null
 
-  const mode = plugin && (plugin.mode === 'control-plane' || plugin.mode === 'in-memory') ? plugin.mode : null
-  const authoritative = Boolean(plugin && plugin.authoritative === true)
-  const source = plugin && typeof plugin.source === 'string' && plugin.source ? plugin.source : null
-  const version = plugin && typeof plugin.version === 'string' && plugin.version ? plugin.version : null
+  const [editor, setEditor] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [confirmingReset, setConfirmingReset] = useState(false)
+  const [feedback, setFeedback] = useState(null)
+  const [actionError, setActionError] = useState(null)
 
-  const transportError = error ? describeError(error, t, 'settings') : null
-  const malformed = Boolean(data && !plugin)
-  const errorText = transportError || (malformed ? translate(t, 'settings.error.invalid') : null)
+  const draft = editor ? editor.draft : server ? createDraft(server) : null
+  const dirty = Boolean(editor && editor.dirty)
+
+  // A poll that observes new saved settings replaces a clean draft, but never
+  // clobbers fields the operator is editing.
+  useEffect(() => {
+    if (!server) return
+    setEditor((current) => (current && current.dirty ? current : null))
+  }, [server])
+
+  const clearMessages = () => {
+    setFeedback(null)
+    setActionError(null)
+  }
+
+  const updateField = (field, value) => {
+    setEditor((current) => {
+      const base = current ? current.draft : createDraft(server)
+      if (!base) return current
+      return { draft: { ...base, [field]: value }, dirty: true }
+    })
+    clearMessages()
+  }
+
+  const cancelEdits = () => {
+    setEditor(null)
+    clearMessages()
+  }
+
+  const applyDefaults = () => {
+    const base = createDraft(defaults)
+    if (!base) return
+    setEditor({ draft: base, dirty: true })
+    setActionError(null)
+    setFeedback({ tone: 'info', text: translate(t, 'settings.feedback.defaultsApplied') })
+  }
+
+  const save = () => {
+    if (!server || !draft || saving || resetting) return
+    const errors = validateDraft(draft)
+    if (errors.length > 0) {
+      const first = errors[0]
+      setFeedback(null)
+      setActionError({ text: translate(t, first.key, first.params), details: null })
+      return
+    }
+    const patch = buildSettingsPatch(draft, server)
+    if (!patch) {
+      setActionError(null)
+      setFeedback({ tone: 'info', text: translate(t, 'settings.feedback.noChanges') })
+      return
+    }
+    setSaving(true)
+    clearMessages()
+    saveSettings(patch).then((outcome) => {
+      setSaving(false)
+      if (outcome.data) {
+        setEditor(null)
+        setFeedback({
+          tone: 'ok',
+          text: translate(t, 'settings.feedback.saved', { time: formatTime(outcome.data.savedAt) || '—' })
+        })
+        reload()
+      } else if (outcome.error) {
+        setActionError({
+          text: describeError(outcome.error, t, 'settings'),
+          details: describeDetails(outcome.error.details)
+        })
+      }
+    })
+  }
+
+  const reset = () => {
+    if (saving || resetting) return
+    setResetting(true)
+    clearMessages()
+    resetEngineData().then((outcome) => {
+      setResetting(false)
+      setConfirmingReset(false)
+      if (outcome.data) {
+        setEditor(null)
+        setFeedback({
+          tone: 'ok',
+          text: translate(t, 'settings.feedback.reset', { count: totalCount(outcome.data.counts) })
+        })
+        reload()
+      } else if (outcome.error) {
+        setActionError({
+          text: describeError(outcome.error, t, 'settings'),
+          details: describeDetails(outcome.error.details)
+        })
+      }
+    })
+  }
+
+  const mode = data ? data.mode : null
+  const modeLabel = mode && hasCopy(`settings.mode.${mode}`)
+    ? translate(t, `settings.mode.${mode}`)
+    : translate(t, 'settings.mode.unknown')
+  const authoritative = mode === 'embedded' || mode === 'control-plane'
+  const healthLabel = health && health.status ? health.status : translate(t, 'settings.health.unknown')
+  const errorText = error ? describeError(error, t, 'settings') : null
   const refreshedText = refreshedAt ? formatTime(refreshedAt) : null
-  const rows = plugin ? configRows(plugin, t) : null
+  const busy = saving || resetting
+  const stateName = saving
+    ? 'saving'
+    : resetting
+      ? 'resetting'
+      : actionError
+        ? 'error'
+        : feedback
+          ? 'saved'
+          : data
+            ? 'ready'
+            : errorText
+              ? 'error'
+              : 'loading'
+
+  const policyVersionLocked = !canEditPolicy(editable, 'policyVersion')
+  const actorDidLocked = !canEdit(editable, 'actorDid')
+  const interventionLocked = !canEdit(editable, 'allowInterventionExecution')
 
   return (
-    <section style={styles.section} data-trust-settings="trust-platform">
+    <section
+      style={styles.section}
+      data-trust-settings="trust-platform"
+      data-trust-state={stateName}
+    >
       <div style={styles.sectionHead}>
         <span style={styles.sectionTitle}>{translate(t, 'settings.title')}</span>
-        {mode ? <Badge tone={mode === 'control-plane' ? 'ok' : 'info'}>{modeText(mode, t)}</Badge> : null}
-        {plugin ? (
+        {data ? <Badge tone={modeTone(mode)}>{modeLabel}</Badge> : null}
+        {data ? (
           authoritative
-            ? <Badge tone="ok">{translate(t, 'overview.authoritative')}</Badge>
-            : <Badge tone="warn">{translate(t, 'overview.nonAuthoritative')}</Badge>
+            ? <Badge tone="ok">{translate(t, 'settings.authoritative')}</Badge>
+            : <Badge tone="warn">{translate(t, 'settings.nonAuthoritative')}</Badge>
         ) : null}
-        {version ? <span style={styles.mono}>{`v${version}`}</span> : null}
         {refreshedText ? (
           <span style={styles.meta}>{translate(t, 'settings.updated', { time: refreshedText })}</span>
         ) : null}
         <span style={styles.actions}>
-          <button type="button" onClick={reload} disabled={loading} style={styles.actionButton}>
+          <button
+            type="button"
+            onClick={reload}
+            disabled={busy || snapshot.loading}
+            style={actionStyle(styles.actionButton, busy || snapshot.loading)}
+          >
             {translate(t, errorText ? 'settings.retry' : 'settings.refresh')}
           </button>
         </span>
       </div>
 
-      {errorText && (!data || malformed) ? (
+      {errorText && !data ? (
         <div style={styles.errorBox}>
           <span>{errorText}</span>
-          <button type="button" onClick={reload} disabled={loading} style={styles.actionButton}>
+          <button type="button" onClick={reload} disabled={busy} style={actionStyle(styles.actionButton, busy)}>
             {translate(t, 'settings.retry')}
           </button>
         </div>
       ) : null}
-      {!data && !errorText ? <div style={styles.muted}>{translate(t, 'settings.loading')}</div> : null}
-
-      {data && plugin ? (
-        <div style={styles.metaRow}>
-          <span>{translate(t, 'settings.mode')}: {modeText(mode, t)}</span>
-          {source ? <span>{translate(t, 'settings.source')}: {source}</span> : null}
-          <span>{translate(t, 'settings.health')}: {healthText(health, mode, t)}</span>
-        </div>
-      ) : null}
-      {data && transportError ? (
-        <div style={styles.staleBox}>{translate(t, 'settings.error.stale', { message: transportError })}</div>
+      {!data && !errorText ? (
+        <div style={styles.muted}>{translate(t, 'settings.loading')}</div>
       ) : null}
 
-      {data && plugin ? <div style={styles.subTitle}>{translate(t, 'settings.config')}</div> : null}
-      {data && plugin && rows ? (
-        <div style={styles.configTable}>
-          {rows.map((row) => (
-            <div key={row.key} style={styles.configRow}>
-              <span style={styles.configKey}>{translate(t, row.key)}</span>
-              <span style={styles.configValue}>{row.value}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {data && plugin && !rows ? (
-        <div style={styles.muted}>{translate(t, 'settings.config.notReported')}</div>
-      ) : null}
-
-      {data && plugin ? (
+      {data ? (
         <>
-          <div style={styles.subTitle}>{translate(t, 'settings.counts')}</div>
-          <div style={styles.counts}>
-            {COUNT_KEYS.map((key) => (
-              <div key={key} style={styles.countCell}>
-                <div style={styles.countValue}>{countText(counts, key)}</div>
-                <div style={styles.countLabel}>{translate(t, `overview.count.${key}`)}</div>
-              </div>
-            ))}
+          <div style={styles.metaRow}>
+            <span>{translate(t, 'settings.mode')}: {modeLabel}</span>
+            {data.dataDir ? (
+              <span style={styles.mono} title={data.dataDir}>
+                {translate(t, 'settings.dataDir')}: {data.dataDir}
+              </span>
+            ) : null}
+            <span>{translate(t, 'settings.health')}: {healthLabel}</span>
+            {health && health.schemaRevision ? (
+              <span style={styles.mono}>
+                {translate(t, 'settings.schemaRevision')}: {health.schemaRevision}
+              </span>
+            ) : null}
+            {health && health.startedAt ? (
+              <span>{translate(t, 'settings.startedAt')}: {formatTime(health.startedAt) || health.startedAt}</span>
+            ) : null}
           </div>
+
+          {errorText ? (
+            <div style={styles.staleBox}>{translate(t, 'settings.error.stale', { message: errorText })}</div>
+          ) : null}
+
+          <div style={styles.subTitle}>{translate(t, 'settings.form.title')}</div>
+          <div style={styles.note}>{translate(t, 'settings.form.hint')}</div>
+
+          {draft ? (
+            <div style={styles.form} data-trust-form="settings">
+              <div style={styles.formRow}>
+                <label style={styles.formLabel} htmlFor="trust-platform-actor-did">
+                  {translate(t, 'settings.field.actorDid')}
+                </label>
+                <div style={styles.formControl}>
+                  <input
+                    id="trust-platform-actor-did"
+                    type="text"
+                    value={draft.actorDid}
+                    maxLength={200}
+                    disabled={actorDidLocked || busy}
+                    onChange={(event) => updateField('actorDid', event.target.value)}
+                    data-trust-field="actorDid"
+                    style={controlStyle(styles.input, actorDidLocked || busy)}
+                  />
+                  <span style={styles.hint}>{translate(t, 'settings.hint.actorDid')}</span>
+                </div>
+              </div>
+
+              <div style={styles.formRow}>
+                <label style={styles.formLabel} htmlFor="trust-platform-allow-intervention">
+                  {translate(t, 'settings.field.allowInterventionExecution')}
+                </label>
+                <div style={styles.formControl}>
+                  <input
+                    id="trust-platform-allow-intervention"
+                    type="checkbox"
+                    checked={draft.allowInterventionExecution}
+                    disabled={interventionLocked || busy}
+                    onChange={(event) => updateField('allowInterventionExecution', event.target.checked)}
+                    data-trust-field="allowInterventionExecution"
+                    style={styles.checkbox}
+                  />
+                  <span style={styles.hint}>{translate(t, 'settings.hint.intervention')}</span>
+                </div>
+              </div>
+
+              <div style={styles.formRow}>
+                <label style={styles.formLabel} htmlFor="trust-platform-policy-version">
+                  {translate(t, 'settings.field.policyVersion')}
+                </label>
+                <div style={styles.formControl}>
+                  <input
+                    id="trust-platform-policy-version"
+                    type="text"
+                    value={draft.policyVersion}
+                    maxLength={120}
+                    disabled={policyVersionLocked || busy}
+                    onChange={(event) => updateField('policyVersion', event.target.value)}
+                    data-trust-field="policyVersion"
+                    data-trust-policy="policyVersion"
+                    style={controlStyle(styles.input, policyVersionLocked || busy)}
+                  />
+                </div>
+              </div>
+
+              {POLICY_NUMBER_FIELDS.map((field) => {
+                const amount = AMOUNT_FIELDS.has(field)
+                const locked = !canEditPolicy(editable, field) || busy
+                return (
+                  <div key={field} style={styles.formRow}>
+                    <label style={styles.formLabel} htmlFor={`trust-platform-policy-${field}`}>
+                      {translate(t, `settings.field.${field}`)}
+                    </label>
+                    <div style={styles.formControl}>
+                      <input
+                        id={`trust-platform-policy-${field}`}
+                        type="number"
+                        inputMode="decimal"
+                        value={draft[field]}
+                        min={amount ? 1 : 0}
+                        max={amount ? MAX_AMOUNT : 1}
+                        step={amount ? 1 : 0.01}
+                        disabled={locked}
+                        onChange={(event) => updateField(field, event.target.value)}
+                        data-trust-policy={field}
+                        style={controlStyle(styles.inputNumber, locked)}
+                      />
+                      <span style={styles.hint}>
+                        {amount
+                          ? translate(t, 'settings.hint.amount', { max: MAX_AMOUNT })
+                          : translate(t, 'settings.hint.ratio')}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+              <div style={styles.note}>{translate(t, 'settings.hint.thresholds')}</div>
+
+              <div style={styles.formActions}>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={busy || !dirty}
+                  data-trust-action="save"
+                  style={actionStyle(styles.primaryButton, busy || !dirty)}
+                >
+                  {translate(t, saving ? 'settings.action.saving' : 'settings.action.save')}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelEdits}
+                  disabled={busy || !dirty}
+                  data-trust-action="cancel"
+                  style={actionStyle(styles.actionButton, busy || !dirty)}
+                >
+                  {translate(t, 'settings.action.cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={applyDefaults}
+                  disabled={busy || !defaults}
+                  data-trust-action="apply-defaults"
+                  style={actionStyle(styles.actionButton, busy || !defaults)}
+                >
+                  {translate(t, 'settings.action.applyDefaults')}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <div style={styles.subTitle}>{translate(t, 'settings.reset.title')}</div>
+          <div style={styles.note}>{translate(t, 'settings.reset.description')}</div>
+          <div style={styles.formActions}>
+            <button
+              type="button"
+              onClick={() => setConfirmingReset(true)}
+              disabled={busy || confirmingReset}
+              data-trust-action="reset-data"
+              style={actionStyle(styles.dangerButton, busy || confirmingReset)}
+            >
+              {translate(t, resetting ? 'settings.action.resetting' : 'settings.action.reset')}
+            </button>
+          </div>
+
+          {confirmingReset ? (
+            <div style={styles.confirmBox} data-trust-confirm="reset">
+              <div>{translate(t, 'settings.reset.confirm')}</div>
+              <span style={styles.actions}>
+                <button
+                  type="button"
+                  onClick={reset}
+                  disabled={resetting}
+                  data-trust-confirm-reset=""
+                  style={actionStyle(styles.dangerButton, resetting)}
+                >
+                  {translate(t, resetting ? 'settings.action.resetting' : 'settings.action.confirmReset')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingReset(false)}
+                  disabled={resetting}
+                  data-trust-action="cancel-reset"
+                  style={actionStyle(styles.actionButton, resetting)}
+                >
+                  {translate(t, 'settings.action.cancelReset')}
+                </button>
+              </span>
+            </div>
+          ) : null}
+
+          {feedback ? (
+            <div
+              style={feedback.tone === 'ok' ? styles.feedbackOk : styles.note}
+              data-trust-feedback={feedback.tone}
+            >
+              {feedback.text}
+            </div>
+          ) : null}
+          {actionError ? (
+            <div style={styles.errorBox} data-trust-feedback="error">
+              <span>{actionError.text}</span>
+              {actionError.details ? (
+                <span style={styles.mono}>
+                  {translate(t, 'settings.error.details', { details: actionError.details })}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </>
       ) : null}
-
-      <div style={styles.note}>{translate(t, 'settings.config.note')}</div>
     </section>
   )
 }

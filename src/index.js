@@ -1,11 +1,13 @@
 /**
- * DSH plugin: trust-platform tools with an in-memory sandbox and an
- * optional authoritative control-plane backend.
+ * DSH plugin: an embedded cross-border identity and payment-trust plane.
  *
- * The default mode registers a deterministic in-memory sandbox so tools exist
- * without any service. `mode: control-plane` replaces those sandbox tools with
- * authoritative tools backed by the legacy FastAPI control plane and provides a
- * `trustPlatformClient` service for other plugins.
+ * The whole trust plane runs inside the plugin process. Tools and the browser
+ * settings panel talk to the same in-process engine, which owns identity,
+ * credential, delegation, payment-task, operation-event, risk, evidence and
+ * governance records and persists them under `$DSH_HOME/plugin-data`.
+ *
+ * There is no sidecar service, no HTTP control plane and no listening port.
+ * The plugin never moves funds and never settles value.
  *
  * @module @sealwax/dsh-trust-platform
  */
@@ -14,12 +16,11 @@ import Schema from '@deepseek-ai/schemastery'
 
 import { createRequire } from 'node:module'
 
-import { createControlPlaneClient, validateBaseUrl } from './control-plane-client.js'
-import { createControlPlaneTools } from './control-plane-tools.js'
-import { createCoverageTools } from './coverage-tools.js'
-import { createInMemoryTools } from './in-memory-tools.js'
-import { createRemoteTools } from './remote-tools.js'
-import { buildOverview, createControlPlaneState, createSandboxState } from './state.js'
+import { createTrustPlane } from './engine/index.js'
+import { DEFAULT_POLICY, FileStore, MemoryStore, defaultDataDir } from './engine/core.js'
+import { createEngineTools } from './engine-tools.js'
+import { buildOverview } from './state.js'
+import { TRUST_PLANE_SERVICE } from './toolkit.js'
 import { registerUiRoute } from './ui-route.js'
 
 /** Plugin version surfaced by the browser half; read once when the module loads. */
@@ -28,47 +29,65 @@ const PLUGIN_VERSION = readPluginVersion()
 /** Plugin name registered with Cordis. */
 export const name = 'dsh-trust-platform'
 
-/** The plugin contributes tools only. */
+/** The plugin contributes tools; the browser half is injected optionally. */
 export const inject = ['tools']
 
-const MODES = ['in-memory', 'control-plane']
+/** Supported persistence modes. */
+const MODES = ['embedded', 'sandbox']
 
 /**
  * Plugin configuration.
  *
  * Cordis validates this schema before `apply` runs and fills every default, so
- * deployments only need to set the fields they change.
+ * deployments only need to set the fields they change. Runtime-editable values
+ * (actor DID, intervention gate, policy thresholds) can also be changed from the
+ * DSH Settings panel and are persisted with the engine state.
  */
 export const Config = Schema.object({
   mode: Schema.union(MODES)
-    .default('in-memory')
+    .default('embedded')
     .description(
-      'Backend mode: "in-memory" is a deterministic non-authoritative sandbox; ' +
-        '"control-plane" calls the real FastAPI trust control plane.',
+      'Persistence mode: "embedded" keeps the trust plane state on disk under ' +
+        '$DSH_HOME/plugin-data/dsh-trust-platform; "sandbox" keeps it in memory only.',
     ),
-  baseUrl: Schema.string()
+  dataDir: Schema.string()
     .default('')
-    .description('Required in control-plane mode: absolute base URL, e.g. http://127.0.0.1:8080.'),
-  token: Schema.string()
-    .role('secret')
-    .default('')
-    .description('Optional bearer token. The development server ignores it; production requires a JWT.'),
+    .description(
+      'Optional state directory for embedded mode. Empty uses $DSH_HOME/plugin-data/dsh-trust-platform.',
+    ),
   actorDid: Schema.string()
-    .default('')
-    .description('Optional X-Actor-DID sent on control-plane requests. Leave empty to use the service default actor.'),
-  timeoutMs: Schema.number()
-    .default(30000)
-    .description('Per-request timeout in milliseconds.'),
+    .default('system:dsh-web')
+    .description('Default actor DID recorded on writes. Editable in the settings panel.'),
   allowInterventionExecution: Schema.boolean()
     .default(false)
     .description(
-      'Control-plane mode only: register execute_intervention, which executes intervention decisions ' +
-        'and may reserve quota. Disabled by default.',
+      'Allow execute_intervention to record an execution receipt. Records only; never transfers funds.',
     ),
+  policy: Schema.object({
+    policyVersion: Schema.string()
+      .default(DEFAULT_POLICY.policyVersion)
+      .description('Policy version stamped on decisions and evidence.'),
+    singleAmountLimit: Schema.number()
+      .default(DEFAULT_POLICY.singleAmountLimit)
+      .description('Single-payment amount ceiling used by admission and authorization checks.'),
+    dailyAmountLimit: Schema.number()
+      .default(DEFAULT_POLICY.dailyAmountLimit)
+      .description('Daily amount ceiling used by admission and authorization checks.'),
+    riskBlockThreshold: Schema.number().default(DEFAULT_POLICY.riskBlockThreshold).description('BLOCK at or above this risk score.'),
+    riskDeferThreshold: Schema.number().default(DEFAULT_POLICY.riskDeferThreshold).description('DEFER at or above this risk score.'),
+    riskThrottleThreshold: Schema.number()
+      .default(DEFAULT_POLICY.riskThrottleThreshold)
+      .description('THROTTLE at or above this risk score.'),
+    defaultTrustScore: Schema.number()
+      .default(DEFAULT_POLICY.defaultTrustScore)
+      .description('Trust score assigned to a freshly registered identity.'),
+  })
+    .default({})
+    .description('Deterministic policy thresholds. Editable in the settings panel.'),
 })
 
 /**
- * Register the configured tool set.
+ * Start the embedded trust plane and register its tools and browser API.
  *
  * @param ctx - Cordis context with the `tools` service.
  * @param config - validated configuration (defaults are filled by Cordis).
@@ -76,110 +95,73 @@ export const Config = Schema.object({
 export function apply(ctx, config) {
   const settings = normalizeConfig(config)
   const startedAt = new Date().toISOString()
-
-  if (settings.mode === 'control-plane') {
-    const client = createControlPlaneClient({
-      baseUrl: settings.baseUrl,
-      token: settings.token,
+  const dataDir = settings.dataDir === '' ? defaultDataDir() : settings.dataDir
+  const store = settings.mode === 'sandbox' ? new MemoryStore() : new FileStore(dataDir)
+  const plane = createTrustPlane({
+    settings: {
       actorDid: settings.actorDid,
-      timeoutMs: settings.timeoutMs,
-    })
-    ctx.provide('trustPlatformClient', client)
-    // Resolve lazily on every call: reloads can replace the service, and tools
-    // must never hold a stale client from apply time.
-    const resolveClient = () => ctx.get('trustPlatformClient')
-    const state = createControlPlaneState()
-    for (const definition of createControlPlaneTools({
-      resolveClient,
-      config: settings,
       allowInterventionExecution: settings.allowInterventionExecution,
-      state,
-    })) {
-      ctx.tools.register(definition)
-    }
-    for (const definition of createRemoteTools({ resolveClient, config: settings })) {
-      ctx.tools.register(definition)
-    }
-    for (const definition of createCoverageTools({ resolveClient })) {
-      ctx.tools.register(definition)
-    }
-    registerUiRoute(ctx, {
-      getOverview: () => buildControlPlaneOverview({ client, state, startedAt, settings }),
-    })
-    return
-  }
-
-  if (settings.mode !== 'in-memory') {
-    throw new Error(`[dsh-trust-platform] unknown mode "${settings.mode}"; expected one of: ${MODES.join(', ')}`)
-  }
-  if (settings.allowInterventionExecution) {
-    throw new Error(
-      '[dsh-trust-platform] allowInterventionExecution requires mode "control-plane"; ' +
-        'the in-memory sandbox has no intervention execution endpoint',
+      policy: settings.policy,
+    },
+    store,
+    logger: ctx?.logger ?? null,
+    mode: settings.mode,
+    startedAt,
+  })
+  ctx.provide(TRUST_PLANE_SERVICE, plane)
+  // Persist pending state when the plugin is disposed or reloaded.
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(
+      () => () => {
+        try {
+          plane.flush()
+        } catch {
+          // Best effort: shutdown must never fail because of a write error.
+        }
+      },
+      'trust-platform: flush embedded state',
     )
   }
-  const state = createSandboxState()
-  for (const definition of createInMemoryTools(state)) ctx.tools.register(definition)
+  // Resolve the plane lazily on every call: a reload replaces the service and a
+  // tool must never hold a stale engine captured at apply time.
+  const resolvePlane = () => ctx.get(TRUST_PLANE_SERVICE)
+  const toolOptions = { allowInterventionExecution: settings.allowInterventionExecution }
+  for (const definition of createEngineTools(resolvePlane, toolOptions)) ctx.tools.register(definition)
   registerUiRoute(ctx, {
-    getOverview: async () =>
-      buildOverview({
-        mode: 'in-memory',
-        version: PLUGIN_VERSION,
-        state,
-        startedAt,
-        health: { status: 'sandbox' },
-        config: publicConfig(settings),
-      }),
+    getOverview: () => buildOverview({ plane, version: PLUGIN_VERSION, mode: settings.mode, startedAt, health: healthOf(plane, settings, startedAt), config: publicConfig(plane, store, settings) }),
+    getHealth: () => ({ ...healthOf(plane, settings, startedAt) }),
+    getSettings: () => ({
+      ...plane.settingsSnapshot(),
+      dataDir: store.dataDir ?? null,
+      data_dir: store.dataDir ?? null,
+      editable: true,
+    }),
+    updateSettings: (patch) => plane.updateSettings(patch),
+    reset: () => plane.reset(),
   })
 }
 
-/**
- * Snapshot control-plane health plus the cached records for the overview route.
- *
- * A health failure never fails the whole overview: the route reports the cached
- * counts and marks the service unreachable so the browser can render a warning.
- *
- * @param options.client - the plugin's control-plane client.
- * @param options.state - control-plane state container.
- * @param options.startedAt - ISO timestamp captured when the plugin applied.
- * @param options.settings - normalized plugin configuration.
- * @returns overview object consumed by the browser half.
- */
-async function buildControlPlaneOverview({ client, state, startedAt, settings }) {
-  let health
-  try {
-    const { data } = await client.request('health', undefined, { timeoutMs: 2000 })
-    health = data !== null && typeof data === 'object' ? data : { status: 'unknown' }
-  } catch (error) {
-    health = {
-      status: 'unreachable',
-      error_code: typeof error?.code === 'string' ? error.code : 'TRUST_HEALTH_UNAVAILABLE',
-      checked_at: new Date().toISOString(),
-    }
-  }
-  return buildOverview({
-    mode: 'control-plane',
-    version: PLUGIN_VERSION,
-    state,
-    startedAt,
-    health,
-    config: publicConfig(settings),
-  })
-}
-
-/**
- * Reduce plugin configuration to display-safe fields for the browser half.
- *
- * @param settings - normalized plugin configuration.
- * @returns config block without the bearer token.
- */
-function publicConfig(settings) {
+/** Health document including the current persistence mode and data directory. */
+function healthOf(plane, settings, startedAt) {
   return {
-    baseUrl: settings.baseUrl,
-    actorDid: settings.actorDid,
-    timeoutMs: settings.timeoutMs,
-    allowInterventionExecution: settings.allowInterventionExecution,
-    tokenConfigured: settings.token !== '',
+    ...plane.health(),
+    mode: settings.mode,
+    started_at: startedAt,
+    checked_at: new Date().toISOString(),
+  }
+}
+
+/**
+ * Reduce configuration to display-safe fields for the browser half.
+ */
+function publicConfig(plane, store, settings) {
+  const live = plane.settingsSnapshot().settings
+  return {
+    mode: settings.mode,
+    data_dir: store.dataDir ?? null,
+    actor_did: live.actorDid,
+    allow_intervention_execution: live.allowInterventionExecution,
+    policy: live.policy,
   }
 }
 
@@ -189,19 +171,44 @@ function publicConfig(settings) {
  */
 function normalizeConfig(config) {
   const raw = config !== null && typeof config === 'object' ? config : {}
-  const withDefaults = {
-    mode: raw.mode ?? 'in-memory',
-    baseUrl: raw.baseUrl ?? '',
-    token: raw.token ?? '',
-    actorDid: raw.actorDid ?? '',
-    timeoutMs: raw.timeoutMs ?? 30000,
-    allowInterventionExecution: raw.allowInterventionExecution ?? false,
+  const mode = typeof raw.mode === 'string' && raw.mode !== '' ? raw.mode : 'embedded'
+  if (!MODES.includes(mode)) {
+    throw new Error(`[dsh-trust-platform] unknown mode "${mode}"; expected one of: ${MODES.join(', ')}`)
   }
-  if (withDefaults.mode === 'control-plane') {
-    // Throws the actionable baseUrl error before any client is constructed.
-    withDefaults.baseUrl = validateBaseUrl(withDefaults.baseUrl)
+  const policy = normalizePolicyConfig(raw.policy)
+  return {
+    mode,
+    dataDir: typeof raw.dataDir === 'string' ? raw.dataDir.trim() : '',
+    actorDid: nonEmptyString(raw.actorDid ?? raw.actor_did, 'system:dsh-web'),
+    allowInterventionExecution: raw.allowInterventionExecution === true,
+    policy,
   }
-  return withDefaults
+}
+
+/** Merge the configured policy block over the deterministic defaults. */
+function normalizePolicyConfig(policy) {
+  const raw = policy !== null && typeof policy === 'object' ? policy : {}
+  return {
+    policyVersion: nonEmptyString(raw.policyVersion ?? raw.policy_version, DEFAULT_POLICY.policyVersion),
+    singleAmountLimit: finiteOr(raw.singleAmountLimit ?? raw.single_amount_limit, DEFAULT_POLICY.singleAmountLimit),
+    dailyAmountLimit: finiteOr(raw.dailyAmountLimit ?? raw.daily_amount_limit, DEFAULT_POLICY.dailyAmountLimit),
+    riskBlockThreshold: finiteOr(raw.riskBlockThreshold ?? raw.risk_block_threshold, DEFAULT_POLICY.riskBlockThreshold),
+    riskDeferThreshold: finiteOr(raw.riskDeferThreshold ?? raw.risk_defer_threshold, DEFAULT_POLICY.riskDeferThreshold),
+    riskThrottleThreshold: finiteOr(
+      raw.riskThrottleThreshold ?? raw.risk_throttle_threshold,
+      DEFAULT_POLICY.riskThrottleThreshold,
+    ),
+    defaultTrustScore: finiteOr(raw.defaultTrustScore ?? raw.default_trust_score, DEFAULT_POLICY.defaultTrustScore),
+  }
+}
+
+function nonEmptyString(value, fallback) {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : fallback
+}
+
+function finiteOr(value, fallback) {
+  const number = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(number) ? number : fallback
 }
 
 /**

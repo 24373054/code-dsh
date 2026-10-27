@@ -237,34 +237,126 @@ export const pluginBadge = {
   whiteSpace: 'nowrap'
 }
 
-/** Read-only configuration table of the settings page. */
-export const configTable = {
+/** Settings form: one column of label/control rows. */
+export const form = {
   display: 'flex',
   flexDirection: 'column',
-  gap: '2px',
-  marginTop: '8px'
+  gap: '6px',
+  marginTop: '10px'
 }
 
-export const configRow = {
+export const formRow = {
   display: 'flex',
-  alignItems: 'baseline',
+  alignItems: 'center',
   gap: '12px',
-  paddingTop: '5px',
-  borderTop: '1px solid var(--dsw-color-border, rgba(127, 127, 127, 0.18))',
+  flexWrap: 'wrap',
+  paddingTop: '6px',
+  borderTop: '1px solid var(--dsw-color-border, rgba(127, 127, 127, 0.18))'
+}
+
+export const formLabel = {
+  flex: '0 0 220px',
+  color: MUTED,
   fontSize: '12px'
 }
 
-export const configKey = {
-  flex: '0 0 190px',
-  color: MUTED
+export const formControl = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  flex: '1 1 240px',
+  minWidth: '160px'
 }
 
-export const configValue = {
+export const input = {
+  flex: '1 1 240px',
+  minWidth: '160px',
+  padding: '4px 8px',
+  borderRadius: '6px',
+  border: '1px solid var(--dsw-color-border, rgba(127, 127, 127, 0.3))',
+  background: 'var(--dsw-color-surface-subtle, rgba(127, 127, 127, 0.08))',
   color: 'var(--dsw-color-text-primary, inherit)',
-  wordBreak: 'break-word'
+  fontSize: '12px'
 }
 
-/** Footnote under a settings block (read-only explanation, hints). */
+export const inputNumber = {
+  flex: '0 0 180px',
+  minWidth: '150px',
+  padding: '4px 8px',
+  borderRadius: '6px',
+  border: '1px solid var(--dsw-color-border, rgba(127, 127, 127, 0.3))',
+  background: 'var(--dsw-color-surface-subtle, rgba(127, 127, 127, 0.08))',
+  color: 'var(--dsw-color-text-primary, inherit)',
+  fontSize: '12px'
+}
+
+export const checkbox = {
+  width: '14px',
+  height: '14px',
+  accentColor: 'var(--dsw-color-accent, #2563eb)'
+}
+
+export const inputDisabled = {
+  opacity: 0.55,
+  cursor: 'not-allowed'
+}
+
+export const hint = {
+  color: MUTED,
+  fontSize: '11px'
+}
+
+export const formActions = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  flexWrap: 'wrap',
+  marginTop: '10px'
+}
+
+/** Save/apply button; the shell accent marks the primary action. */
+export const primaryButton = {
+  ...actionButton,
+  borderColor: 'var(--dsw-color-accent-border, rgba(37, 99, 235, 0.35))',
+  color: 'var(--dsw-color-accent, #2563eb)',
+  fontWeight: 600
+}
+
+/** Destructive button for the reset action. */
+export const dangerButton = {
+  ...actionButton,
+  borderColor: 'var(--dsw-color-danger-border, rgba(198, 40, 40, 0.35))',
+  color: 'var(--dsw-color-danger, #c62828)'
+}
+
+export const buttonDisabled = {
+  opacity: 0.55,
+  cursor: 'not-allowed'
+}
+
+/** Confirmation strip shown before a destructive reset. */
+export const confirmBox = {
+  marginTop: '8px',
+  padding: '8px 10px',
+  borderRadius: '8px',
+  border: '1px solid var(--dsw-color-warning-border, rgba(154, 103, 0, 0.35))',
+  background: 'var(--dsw-color-warning-bg, rgba(154, 103, 0, 0.08))',
+  color: 'var(--dsw-color-warning, #9a6700)',
+  fontSize: '12px'
+}
+
+/** Success strip after saving or resetting. */
+export const feedbackOk = {
+  marginTop: '8px',
+  padding: '6px 10px',
+  borderRadius: '8px',
+  border: '1px solid var(--dsw-color-success-border, rgba(26, 127, 55, 0.35))',
+  background: 'var(--dsw-color-success-bg, rgba(26, 127, 55, 0.08))',
+  color: 'var(--dsw-color-success, #1a7f37)',
+  fontSize: '12px'
+}
+
+/** Footnote under a settings block (hints, persistence notes). */
 export const note = {
   marginTop: '10px',
   color: MUTED,

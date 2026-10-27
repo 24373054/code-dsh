@@ -23,12 +23,28 @@ import {
   normalizeOverviewBody,
   parsePayload,
   rawPayload,
-  readConfig,
   resultSummary,
   toolDecision,
   toolState
 } from '../src/client/format.js'
 import { NS, en, zh } from '../src/client/locales.js'
+import {
+  MAX_AMOUNT,
+  POLICY_NUMBER_FIELDS,
+  buildSettingsPatch,
+  createDraft,
+  describeDetails,
+  isDraftDirty,
+  normalizeCounts,
+  normalizeHealthPayload,
+  normalizeSettingsPayload,
+  requestHealth,
+  requestSettings,
+  resetEngineData,
+  saveSettings,
+  totalCount,
+  validateDraft
+} from '../src/client/settings-data.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const BUNDLE = resolve(ROOT, 'lib/client.js')
@@ -69,6 +85,21 @@ const EXPECTED_HEAD = 'window.__ModuleLoader__.load({\n'
 /** Tail of the same envelope; the module exports leave through it. */
 const EXPECTED_TAIL = '\t\treturn module.exports;\n\t}\n});\n'
 
+/** One complete embedded-engine settings snapshot. */
+const SAVED_SETTINGS = {
+  actorDid: 'did:trust:operator',
+  allowInterventionExecution: false,
+  policy: {
+    policyVersion: 'policy-2026-10-25-001',
+    singleAmountLimit: 1000000,
+    dailyAmountLimit: 5000000,
+    riskBlockThreshold: 0.8,
+    riskDeferThreshold: 0.6,
+    riskThrottleThreshold: 0.4,
+    defaultTrustScore: 0.95
+  }
+}
+
 /** Build the artifact once; every test reads the same bytes. */
 let bundleText
 before(() => {
@@ -77,10 +108,10 @@ before(() => {
   bundleText = readFileSync(BUNDLE, 'utf8')
 })
 
-/** Minimal baseline stubs; components are never rendered by these tests. */
+/** Minimal baseline stubs; JSX calls still build a tree for marker assertions. */
 const reactStub = {
   Fragment: Symbol('react.fragment'),
-  createElement: () => null,
+  createElement: (type, props) => ({ type, props: props || {} }),
   useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
   useEffect: () => {},
   useCallback: (callback) => callback,
@@ -90,9 +121,9 @@ const reactStub = {
 
 const jsxRuntimeStub = {
   Fragment: Symbol('jsx.fragment'),
-  jsx: () => null,
-  jsxs: () => null,
-  jsxDEV: () => null
+  jsx: (type, props) => ({ type, props: props || {} }),
+  jsxs: (type, props) => ({ type, props: props || {} }),
+  jsxDEV: (type, props) => ({ type, props: props || {} })
 }
 
 function requireStub(specifier) {
@@ -166,6 +197,38 @@ function createClientContext() {
   return { context, registrations, dictionaries, effects }
 }
 
+/** Replace the global fetch for one test and always restore it. */
+async function withFakeFetch(handler, run) {
+  const original = globalThis.fetch
+  globalThis.fetch = handler
+  try {
+    return await run()
+  } finally {
+    globalThis.fetch = original
+  }
+}
+
+/** Minimal Response stand-in for the same-origin JSON routes. */
+function jsonResponse(status, body) {
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    json: async () => body
+  }
+}
+
+/** Collect every JSX tree node depth-first. */
+function collectNodes(node, collected) {
+  if (!node || typeof node !== 'object') return collected
+  if (Array.isArray(node)) {
+    for (const child of node) collectNodes(child, collected)
+    return collected
+  }
+  collected.push(node)
+  if (node.props) collectNodes(node.props.children, collected)
+  return collected
+}
+
 test('build emits the lazy-CJS handoff envelope', () => {
   assert.ok(bundleText.startsWith(EXPECTED_HEAD), 'bundle header must match the client module handoff')
   assert.ok(bundleText.endsWith(EXPECTED_TAIL), 'bundle tail must return module.exports')
@@ -228,7 +291,7 @@ test('apply registers the plugin-manager overview entries', () => {
   assert.equal(registrations.length, 11)
 })
 
-test('apply registers the read-only settings section', () => {
+test('apply registers the editable settings section', () => {
   const { exports } = loadBundle()
   const { context, registrations } = createClientContext()
   exports.apply(context)
@@ -277,7 +340,7 @@ test('apply registers both dictionaries under the trust-platform namespace', () 
   assert.equal(dictionaries[0].dicts.zh['overview.title'], zh['overview.title'])
 })
 
-test('locales cover the tool titles and shared vocabulary', () => {
+test('locales cover the tool titles and settings vocabulary', () => {
   for (const key of TOOL_KEYS) assert.ok(hasCopy(`tool.${key}`), `missing English title for ${key}`)
   for (const key of [
     'status.ok',
@@ -285,14 +348,39 @@ test('locales cover the tool titles and shared vocabulary', () => {
     'status.running',
     'result.waiting',
     'card.raw.show',
+    'overview.mode.embedded',
+    'overview.mode.sandbox',
     'settings.nav',
     'settings.title',
-    'settings.config',
-    'settings.counts',
-    'settings.error.forbidden',
+    'settings.mode.embedded',
+    'settings.mode.sandbox',
+    'settings.dataDir',
+    'settings.form.title',
+    'settings.field.actorDid',
+    'settings.field.allowInterventionExecution',
+    'settings.field.policyVersion',
+    'settings.hint.amount',
+    'settings.hint.ratio',
+    'settings.action.save',
+    'settings.action.cancel',
+    'settings.action.applyDefaults',
+    'settings.action.reset',
+    'settings.action.confirmReset',
+    'settings.reset.title',
+    'settings.reset.confirm',
+    'settings.feedback.saved',
+    'settings.feedback.reset',
+    'settings.error.actorDid',
+    'settings.error.amount',
+    'settings.error.ratio',
+    'settings.error.thresholds',
+    'settings.error.validation',
     'settings.error.stale'
   ]) {
     assert.ok(hasCopy(key), `missing English copy for ${key}`)
+  }
+  for (const field of POLICY_NUMBER_FIELDS) {
+    assert.ok(hasCopy(`settings.field.${field}`), `missing English label for ${field}`)
   }
   assert.deepEqual(Object.keys(en).sort(), Object.keys(zh).sort(), 'zh and en must stay key-identical')
   for (const [key, value] of Object.entries(zh)) {
@@ -340,33 +428,275 @@ test('format helpers interpret the canonical result envelope', () => {
   assert.equal(typeof formatTime(Date.now()), 'string')
 })
 
-test('settings config projection reads only documented fields', () => {
-  const plugin = {
-    name: PLUGIN_ID,
-    config: {
-      base_url: 'https://cp.example.test',
-      actor_did: 'did:example:abc',
-      timeout_ms: 15000,
-      allow_intervention_execution: true,
-      token_configured: false,
-      token: 'must-never-be-rendered'
-    }
+test('settings payload normalizers tolerate partial host data', () => {
+  const normalized = normalizeSettingsPayload({
+    ok: true,
+    mode: 'embedded',
+    dataDir: 'C:/trust-data',
+    settings: SAVED_SETTINGS,
+    defaults: SAVED_SETTINGS,
+    editable: { actorDid: true, allowInterventionExecution: false, policy: { singleAmountLimit: true } }
+  })
+  assert.equal(normalized.mode, 'embedded')
+  assert.equal(normalized.dataDir, 'C:/trust-data')
+  assert.deepEqual(normalized.settings, SAVED_SETTINGS)
+  assert.deepEqual(normalized.defaults, SAVED_SETTINGS)
+  assert.equal(normalized.editable.actorDid, true)
+  assert.equal(normalized.editable.allowInterventionExecution, false)
+  assert.equal(normalized.editable.policy.singleAmountLimit, true)
+  // Anything the Host did not lock stays editable by default.
+  assert.equal(normalized.editable.policy.dailyAmountLimit, true)
+  assert.equal(normalized.editable.policy.policyVersion, true)
+
+  assert.equal(normalizeSettingsPayload(null), null)
+  assert.equal(normalizeSettingsPayload('status'), null)
+  const empty = normalizeSettingsPayload({})
+  assert.equal(empty.mode, null)
+  assert.equal(empty.settings.actorDid, null)
+  assert.equal(empty.settings.policy.singleAmountLimit, null)
+
+  assert.deepEqual(normalizeHealthPayload({
+    ok: true,
+    status: 'ok',
+    mode: 'embedded',
+    engine: 'embedded',
+    schema_revision: 'embedded-1',
+    started_at: '2026-10-27T00:00:00.000Z'
+  }), {
+    status: 'ok',
+    mode: 'embedded',
+    engine: 'embedded',
+    schemaRevision: 'embedded-1',
+    startedAt: '2026-10-27T00:00:00.000Z'
+  })
+  assert.deepEqual(normalizeHealthPayload({}), {
+    status: null,
+    mode: null,
+    engine: null,
+    schemaRevision: null,
+    startedAt: null
+  })
+
+  assert.deepEqual(normalizeCounts({ identities: 2, credentials: 3 }), {
+    identities: 2,
+    credentials: 3,
+    authorizations: null,
+    tasks: null,
+    events: null,
+    receipts: null
+  })
+})
+
+test('settings draft builds a minimal patch and validates engine ranges', () => {
+  assert.equal(MAX_AMOUNT, 1000000000000)
+  assert.deepEqual(Array.from(POLICY_NUMBER_FIELDS), [
+    'singleAmountLimit',
+    'dailyAmountLimit',
+    'riskBlockThreshold',
+    'riskDeferThreshold',
+    'riskThrottleThreshold',
+    'defaultTrustScore'
+  ])
+
+  const draft = createDraft(SAVED_SETTINGS)
+  assert.equal(draft.actorDid, 'did:trust:operator')
+  assert.equal(draft.allowInterventionExecution, false)
+  assert.equal(draft.policyVersion, 'policy-2026-10-25-001')
+  assert.equal(draft.singleAmountLimit, '1000000')
+  assert.equal(draft.riskBlockThreshold, '0.8')
+  assert.equal(createDraft(null), null)
+
+  assert.equal(buildSettingsPatch(draft, SAVED_SETTINGS), null)
+  assert.equal(isDraftDirty(draft, SAVED_SETTINGS), false)
+  assert.deepEqual(validateDraft(draft), [])
+
+  const changed = { ...draft, actorDid: 'did:trust:next-agent', riskBlockThreshold: '0.9' }
+  assert.deepEqual(buildSettingsPatch(changed, SAVED_SETTINGS), {
+    actorDid: 'did:trust:next-agent',
+    policy: { riskBlockThreshold: 0.9 }
+  })
+  assert.equal(isDraftDirty(changed, SAVED_SETTINGS), true)
+  assert.equal(buildSettingsPatch({ ...draft, singleAmountLimit: 'not-a-number' }, SAVED_SETTINGS), null)
+
+  assert.deepEqual(validateDraft({ ...draft, actorDid: 'x' }), [{ key: 'settings.error.actorDid' }])
+  assert.deepEqual(validateDraft({ ...draft, policyVersion: 'ab' }), [{ key: 'settings.error.policyVersion' }])
+  assert.deepEqual(validateDraft({ ...draft, singleAmountLimit: '0' }), [
+    { key: 'settings.error.amount', params: { field: 'singleAmountLimit' } }
+  ])
+  assert.deepEqual(validateDraft({ ...draft, riskBlockThreshold: '1.5' }), [
+    { key: 'settings.error.ratio', params: { field: 'riskBlockThreshold' } }
+  ])
+  assert.deepEqual(validateDraft({ ...draft, defaultTrustScore: '' }), [
+    { key: 'settings.error.number', params: { field: 'defaultTrustScore' } }
+  ])
+  assert.deepEqual(validateDraft({ ...draft, riskBlockThreshold: '0.3' }), [
+    { key: 'settings.error.thresholds' }
+  ])
+  assert.deepEqual(validateDraft(null), [{ key: 'settings.error.invalidDraft' }])
+
+  assert.equal(totalCount({ identities: 1, credentials: 2, authorizations: 3, tasks: 4, events: 5, receipts: 6 }), 21)
+  assert.equal(totalCount({ identities: 2 }), 2)
+  assert.equal(describeDetails(null), null)
+  assert.equal(describeDetails('risk thresholds invalid'), 'risk thresholds invalid')
+  assert.equal(describeDetails({ field: 'riskBlockThreshold' }), '{"field":"riskBlockThreshold"}')
+  assert.ok(describeDetails({ reason: 'x'.repeat(300) }).length <= 200)
+})
+
+test('settings transport maps every outcome onto typed errors', async () => {
+  const calls = []
+  const settingsOutcome = await withFakeFetch(async (url, init) => {
+    calls.push({ url, init })
+    return jsonResponse(200, {
+      ok: true,
+      mode: 'embedded',
+      dataDir: 'C:/trust-data',
+      settings: SAVED_SETTINGS,
+      defaults: SAVED_SETTINGS,
+      editable: {}
+    })
+  }, () => requestSettings())
+  assert.equal(calls[0].url, '/trust-platform/api/settings')
+  assert.equal(calls[0].init.method, 'GET')
+  assert.equal(calls[0].init.credentials, 'same-origin')
+  assert.equal(settingsOutcome.data.mode, 'embedded')
+  assert.equal(settingsOutcome.data.settings.actorDid, 'did:trust:operator')
+
+  const healthOutcome = await withFakeFetch(async () => jsonResponse(200, {
+    ok: true,
+    status: 'ok',
+    mode: 'embedded',
+    engine: 'embedded',
+    schema_revision: 'embedded-1',
+    started_at: '2026-10-27T00:00:00.000Z'
+  }), () => requestHealth())
+  assert.equal(healthOutcome.data.status, 'ok')
+  assert.equal(healthOutcome.data.schemaRevision, 'embedded-1')
+
+  const rejected = await withFakeFetch(async () => jsonResponse(422, {
+    ok: false,
+    error_code: 'VALIDATION_ERROR',
+    message: 'risk thresholds must satisfy block >= defer >= throttle',
+    details: { field: 'riskBlockThreshold' }
+  }), () => saveSettings({ policy: { riskBlockThreshold: 0.9 } }))
+  assert.equal(rejected.error.kind, 'validation')
+  assert.equal(rejected.error.message, 'risk thresholds must satisfy block >= defer >= throttle')
+  assert.deepEqual(rejected.error.details, { field: 'riskBlockThreshold' })
+
+  const forbidden = await withFakeFetch(async () => jsonResponse(403, {}), () => requestSettings())
+  assert.equal(forbidden.error.kind, 'forbidden')
+  const missing = await withFakeFetch(async () => jsonResponse(404, {}), () => requestSettings())
+  assert.equal(missing.error.kind, 'unavailable')
+  const serverError = await withFakeFetch(async () => jsonResponse(500, {}), () => requestSettings())
+  assert.equal(serverError.error.kind, 'http')
+  assert.equal(serverError.error.status, 500)
+  const offline = await withFakeFetch(async () => {
+    throw new TypeError('network unreachable')
+  }, () => requestSettings())
+  assert.equal(offline.error.kind, 'network')
+  assert.equal(offline.error.message, 'network unreachable')
+  const aborted = await withFakeFetch(async () => {
+    throw Object.assign(new Error('aborted'), { name: 'AbortError' })
+  }, () => requestSettings())
+  assert.equal(aborted.aborted, true)
+
+  const sawBody = []
+  const saved = await withFakeFetch(async (url, init) => {
+    sawBody.push({ method: init.method, body: JSON.parse(init.body) })
+    return jsonResponse(200, {
+      ok: true,
+      settings: SAVED_SETTINGS,
+      saved_at: '2026-10-27T00:00:00.000Z'
+    })
+  }, () => saveSettings({ actorDid: 'did:trust:next-agent' }))
+  assert.equal(sawBody[0].method, 'PUT')
+  assert.deepEqual(sawBody[0].body, { actorDid: 'did:trust:next-agent' })
+  assert.equal(saved.data.savedAt, '2026-10-27T00:00:00.000Z')
+
+  const resetBodies = []
+  const reset = await withFakeFetch(async (url, init) => {
+    resetBodies.push({ url, method: init.method, body: JSON.parse(init.body) })
+    return jsonResponse(200, { ok: true, counts: { identities: 1, credentials: 2 } })
+  }, () => resetEngineData())
+  assert.equal(resetBodies[0].url, '/trust-platform/api/reset')
+  assert.equal(resetBodies[0].method, 'POST')
+  assert.deepEqual(resetBodies[0].body, { confirm: true })
+  assert.equal(reset.data.counts.identities, 1)
+
+  const original = globalThis.fetch
+  globalThis.fetch = undefined
+  try {
+    const noFetch = await requestSettings()
+    assert.equal(noFetch.error.kind, 'unavailable')
+  } finally {
+    globalThis.fetch = original
   }
-  assert.deepEqual(readConfig(plugin), {
-    baseUrl: 'https://cp.example.test',
-    actorDid: 'did:example:abc',
-    timeoutMs: 15000,
-    allowInterventionExecution: true,
-    tokenConfigured: false
-  })
-  assert.equal(readConfig({ name: PLUGIN_ID }), null)
-  assert.deepEqual(readConfig({ config: { timeout_ms: 'soon' } }), {
-    baseUrl: null,
-    actorDid: null,
-    timeoutMs: null,
-    allowInterventionExecution: null,
-    tokenConfigured: null
-  })
+})
+
+test('the settings page exposes screenshot-safe data markers', () => {
+  const { exports } = loadBundle()
+  const { context, registrations } = createClientContext()
+  exports.apply(context)
+
+  const component = registrations.find((entry) => entry.options.name === 'settings.section').component
+  const tree = component({ t: (key) => key, close: () => {} })
+  const nodes = collectNodes(tree, [])
+  const root = nodes.find((node) => node.props && node.props['data-trust-settings'] === 'trust-platform')
+  assert.ok(root, 'the settings page root must carry data-trust-settings')
+  assert.equal(root.props['data-trust-state'], 'loading')
+
+  const source = readFileSync(resolve(ROOT, 'src/client/settings.jsx'), 'utf8')
+  for (const marker of [
+    'data-trust-state={stateName}',
+    'data-trust-form="settings"',
+    'data-trust-field="actorDid"',
+    'data-trust-field="allowInterventionExecution"',
+    'data-trust-field="policyVersion"',
+    'data-trust-policy="policyVersion"',
+    'data-trust-policy={field}',
+    'data-trust-action="save"',
+    'data-trust-action="cancel"',
+    'data-trust-action="apply-defaults"',
+    'data-trust-action="reset-data"',
+    'data-trust-action="cancel-reset"',
+    'data-trust-confirm="reset"',
+    'data-trust-confirm-reset=""',
+    'data-trust-feedback='
+  ]) {
+    assert.ok(source.includes(marker), `missing settings marker: ${marker}`)
+  }
+})
+
+test('the package ships localized plugin metadata', () => {
+  const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'))
+  assert.ok(pkg.exports['./locale/*.json'], 'package exports must expose the locale files')
+  assert.ok(pkg.files.some((entry) => entry === 'locale/*.json' || entry === 'locale'), 'locale files must ship')
+
+  const enMeta = JSON.parse(readFileSync(resolve(ROOT, 'locale/en.json'), 'utf8'))
+  const zhMeta = JSON.parse(readFileSync(resolve(ROOT, 'locale/zh.json'), 'utf8'))
+  assert.equal(enMeta.meta.detail, 'docs/DETAIL.md')
+  assert.equal(zhMeta.meta.detail, 'docs/DETAIL.zh.md')
+  assert.deepEqual(Object.keys(enMeta.meta).sort(), Object.keys(zhMeta.meta).sort())
+  assert.ok(enMeta.meta.title.length > 0)
+  assert.ok(zhMeta.meta.title.length > 0)
+  assert.ok(enMeta.meta.description.length > 0)
+  assert.match(enMeta.meta.description, /[.!?]$/)
+  assert.match(zhMeta.meta.description, /[。！？]$/)
+  assert.ok(statSync(resolve(ROOT, enMeta.meta.detail)).isFile(), 'the English detail page must exist')
+  assert.ok(statSync(resolve(ROOT, zhMeta.meta.detail)).isFile(), 'the Chinese detail page must exist')
+})
+
+test('docs describe the embedded engine and start with a preview', () => {
+  const readme = readFileSync(resolve(ROOT, 'README.md'), 'utf8')
+  assert.match(readme, /embedded/i)
+  const englishDetail = readFileSync(resolve(ROOT, 'docs/DETAIL.md'), 'utf8')
+  const chineseDetail = readFileSync(resolve(ROOT, 'docs/DETAIL.zh.md'), 'utf8')
+  const englishFirstLine = englishDetail.split(/\r?\n/, 1)[0]
+  const chineseFirstLine = chineseDetail.split(/\r?\n/, 1)[0]
+  assert.ok(englishFirstLine.startsWith('!['), 'DETAIL.md must start with the preview image')
+  assert.ok(englishFirstLine.includes('preview.svg'), 'DETAIL.md preview must reference preview.svg')
+  assert.ok(chineseFirstLine.startsWith('!['), 'DETAIL.zh.md must start with the preview image')
+  assert.ok(chineseFirstLine.includes('preview.zh.svg'), 'DETAIL.zh.md preview must reference preview.zh.svg')
+  assert.match(chineseDetail, /[\u4e00-\u9fff]/, 'DETAIL.zh.md must be written in Chinese')
 })
 
 test('matchesPlugin recognizes every plugin-manager subject shape', () => {
@@ -380,7 +710,7 @@ test('matchesPlugin recognizes every plugin-manager subject shape', () => {
 })
 
 test('overview responses are accepted flattened or wrapped', () => {
-  const snapshot = { plugin: { name: PLUGIN_ID, mode: 'in-memory' }, counts: { identities: 3 } }
+  const snapshot = { plugin: { name: PLUGIN_ID, mode: 'embedded' }, counts: { identities: 3 } }
   assert.equal(normalizeOverviewBody({ ok: true, overview: snapshot }), snapshot)
   const flat = normalizeOverviewBody({ ok: true, ...snapshot })
   assert.equal(flat.counts.identities, 3)

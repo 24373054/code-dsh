@@ -15,7 +15,7 @@
  * still on screen) instead of unmounting the section.
  */
 import { Badge } from './badge.jsx'
-import { COUNT_KEYS, decisionTone, formatTime, matchesPlugin, translate } from './format.js'
+import { COUNT_KEYS, decisionTone, formatTime, hasCopy, matchesPlugin, translate } from './format.js'
 import { describeError, useOverview } from './overview-data.js'
 import * as styles from './styles.js'
 
@@ -48,7 +48,7 @@ function OverviewBody({ t }) {
   const health = data && data.health && typeof data.health === 'object' ? data.health : null
   const events = data && Array.isArray(data.recent_events) ? data.recent_events.slice(0, MAX_RECENT_EVENTS) : []
 
-  const mode = plugin && (plugin.mode === 'control-plane' || plugin.mode === 'in-memory') ? plugin.mode : null
+  const mode = plugin && typeof plugin.mode === 'string' && plugin.mode ? plugin.mode : null
   const authoritative = Boolean(plugin && plugin.authoritative === true)
   const source = plugin && typeof plugin.source === 'string' && plugin.source ? plugin.source : null
   const version = plugin && typeof plugin.version === 'string' && plugin.version ? plugin.version : null
@@ -63,9 +63,13 @@ function OverviewBody({ t }) {
     <section style={styles.section} data-trust-overview="">
       <div style={styles.sectionHead}>
         <span style={styles.sectionTitle}>{translate(t, 'overview.title')}</span>
-        {mode === 'control-plane' ? <Badge tone="ok">{translate(t, 'overview.mode.control-plane')}</Badge> : null}
-        {mode === 'in-memory' ? <Badge tone="info">{translate(t, 'overview.mode.in-memory')}</Badge> : null}
-        {plugin && !mode ? <Badge tone="neutral">{translate(t, 'overview.mode.unknown')}</Badge> : null}
+        {mode && hasCopy(`overview.mode.${mode}`) ? (
+          <Badge tone={mode === 'embedded' || mode === 'control-plane' ? 'ok' : 'info'}>
+            {translate(t, `overview.mode.${mode}`)}
+          </Badge>
+        ) : plugin ? (
+          <Badge tone="neutral">{translate(t, 'overview.mode.unknown')}</Badge>
+        ) : null}
         {plugin ? (
           authoritative
             ? <Badge tone="ok">{translate(t, 'overview.authoritative')}</Badge>

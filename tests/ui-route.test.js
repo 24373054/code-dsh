@@ -1,185 +1,268 @@
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import test from 'node:test'
 
 import { Config, apply } from '../src/index.js'
-import { API_PREFIX, registerUiRoute } from '../src/ui-route.js'
 
 /**
- * Minimal Cordis-like context for the in-memory mode plus the browser surface.
- *
- * @param options.rejection - value returned by the Connection fence.
- * @returns capture object with registered tools, routes and injections.
+ * Minimal Cordis-like host context: captures tools, services and the injected
+ * browser surface, and exposes one fake registration route per browser route.
  */
-function createHostContext({ rejection } = {}) {
+function createHost({ requestRejection } = {}) {
   const tools = new Map()
+  const services = new Map()
   const routes = []
-  const injections = []
-  return {
+  const effects = []
+  const scoped = {
+    webServer: {
+      register(route) {
+        routes.push(route)
+        return () => {
+          const index = routes.indexOf(route)
+          if (index >= 0) routes.splice(index, 1)
+        }
+      },
+    },
+    connection: {
+      requestRejection(req) {
+        return typeof requestRejection === 'function' ? requestRejection(req) : undefined
+      },
+    },
+    effect(create) {
+      effects.push(create)
+      const dispose = create()
+      return () => {
+        try {
+          dispose?.()
+        } catch {
+          // disposal is best effort in this fake scope
+        }
+      }
+    },
+    get(name) {
+      return scoped[name]
+    },
+  }
+  const ctx = {
     tools: {
       register(definition) {
         tools.set(definition.name, definition)
         return definition
       },
     },
-    inject(deps, callback) {
-      injections.push(deps)
-      const scoped = {
-        webServer: {
-          register(route) {
-            routes.push(route)
-            return () => routes.splice(routes.indexOf(route), 1)
-          },
-        },
-        connection: { requestRejection: () => rejection },
-        effect(effect) {
-          return effect()
-        },
-      }
-      callback(scoped)
-      return { dispose() {} }
+    provide(service, value) {
+      services.set(service, value)
+      return () => services.delete(service)
+    },
+    get(service) {
+      return services.get(service)
+    },
+    effect(create) {
+      effects.push(create)
+      const dispose = create()
+      return () => dispose?.()
+    },
+    inject(names, callback) {
+      assert.deepEqual(names, ['webServer', 'connection'])
+      return callback(scoped)
     },
     registeredTools: tools,
+    services,
     routes,
-    injections,
   }
+  return ctx
 }
 
-/** Run one registered tool directly. */
+/** Execute one registered tool directly. */
 function run(context, toolName, args = {}) {
   const definition = context.registeredTools.get(toolName)
   assert.ok(definition, `tool ${toolName} should be registered`)
   return definition.execute(args, {})
 }
 
-/** Build a fake Node request. */
-function createRequest({ method = 'GET', url = '/' } = {}) {
-  return { method, url, headers: {} }
+/** Invoke the registered browser route and resolve with the fake response. */
+function request(route, { method = 'GET', url = '/trust-platform/api/overview', body } = {}) {
+  return new Promise((resolve) => {
+    const req = new EventEmitter()
+    req.method = method
+    req.url = url
+    req.headers = {}
+    const res = {
+      statusCode: 0,
+      headers: {},
+      body: '',
+      headersSent: false,
+      writeHead(status, responseHeaders) {
+        this.statusCode = status
+        this.headers = responseHeaders
+        this.headersSent = true
+      },
+      end(payload) {
+        this.body = payload === undefined ? '' : String(payload)
+        resolve(this)
+      },
+      destroy() {
+        resolve(this)
+      },
+    }
+    route.handler(req, res)
+    if (method !== 'GET' && method !== 'HEAD') {
+      if (body !== undefined) req.emit('data', Buffer.from(JSON.stringify(body)))
+      req.emit('end')
+    }
+  })
 }
 
-/** Build a fake Node response capturing the written status, headers and body. */
-function createResponse() {
-  const captured = { status: 0, headers: {}, body: '', headersSent: false }
-  return {
-    captured,
-    writeHead(status, headers) {
-      captured.status = status
-      captured.headers = headers ?? {}
-      captured.headersSent = true
-    },
-    end(body) {
-      captured.body = body ?? ''
-      captured.headersSent = true
-    },
-  }
-}
-
-/** Register the route through apply and invoke it once. */
-async function callRoute(context, request, handlerOptions) {
-  const route = context.routes[0]
-  assert.ok(route, 'the trust-platform route should be registered')
-  const response = createResponse()
-  await route.handler(request, response)
-  return { route, response, payload: response.captured.body === '' ? null : JSON.parse(response.captured.body) }
-}
-
-test('browser API registers one web-server prefix route guarded by connection', () => {
-  const ctx = createHostContext()
-  apply(ctx, Config({}))
-  assert.deepEqual(ctx.injections, [['webServer', 'connection']])
+/** Host with a sandbox trust plane and one registered browser route. */
+function startHost(options = {}) {
+  const ctx = createHost(options)
+  apply(ctx, Config({ mode: 'sandbox' }))
   assert.equal(ctx.routes.length, 1)
-  const route = ctx.routes[0]
+  return { ctx, route: ctx.routes[0] }
+}
+
+/** Parse one JSON response body. */
+function json(response) {
+  return JSON.parse(response.body)
+}
+
+test('browser API registers one fenced prefix route', () => {
+  const { ctx, route } = startHost()
   assert.equal(route.kind, 'prefix')
-  assert.equal(route.path, API_PREFIX)
+  assert.equal(route.path, '/trust-platform/api')
   assert.equal(typeof route.handler, 'function')
+  assert.equal(ctx.registeredTools.size, 58)
 })
 
-test('overview reports sandbox records and recent operation events', async () => {
-  const ctx = createHostContext()
-  apply(ctx, Config({}))
-  const identity = await run(ctx, 'register_identity', {
-    did: 'did:trust:demo:ui-agent',
-    domain: 'demo',
-    display_name: 'UI Agent',
+test('overview reports embedded engine state and counts', async () => {
+  const { ctx, route } = startHost()
+  await run(ctx, 'register_identity', {
+    domain_id: 'bank.example',
+    subject_id: 'agent-1',
+    display_name: 'Agent One',
   })
-  assert.equal(identity.ok, true)
-  const authorization = await run(ctx, 'check_authorization', {
-    did: 'did:trust:demo:ui-agent',
-    beneficiary: 'shop.example',
-    amount: 25,
-    currency: 'USD',
-  })
-  assert.equal(authorization.ok, true)
-  const task = await run(ctx, 'create_payment_task', {
-    authorization_id: authorization.authorization.id,
-    purpose: 'UI overview test',
-  })
-  assert.equal(task.ok, true)
-  const event = await run(ctx, 'submit_operation_event', {
-    task_id: task.task.id,
-    event_type: 'PAYREQ',
-    event_ref: 'external-ui-1',
-  })
-  assert.equal(event.ok, true)
-
-  const { response, payload } = await callRoute(ctx, createRequest({ url: `${API_PREFIX}/overview` }))
-  assert.equal(response.captured.status, 200)
-  assert.equal(response.captured.headers['cache-control'], 'no-store')
-  assert.equal(payload.ok, true)
-  const overview = payload
-  assert.equal(overview.plugin.name, '@sealwax/dsh-trust-platform')
-  assert.equal(overview.plugin.mode, 'in-memory')
-  assert.equal(overview.plugin.source, 'in-memory-sandbox')
-  assert.equal(overview.plugin.authoritative, false)
-  assert.match(overview.plugin.version, /^\d+\.\d+\.\d+/)
-  assert.equal(overview.health.status, 'sandbox')
-  assert.deepEqual(overview.counts, {
-    identities: 1,
-    credentials: 0,
-    authorizations: 1,
-    tasks: 1,
-    events: 1,
-    receipts: 0,
-  })
-  assert.equal(overview.recent_events.length, 1)
-  assert.equal(overview.recent_events[0].event_type, 'PAYREQ')
-  assert.equal(overview.recent_events[0].task_id, task.task.id)
-  assert.equal(typeof overview.recent_events[0].occurred_at, 'string')
+  const response = await request(route)
+  assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['cache-control'], 'no-store')
+  const body = json(response)
+  assert.equal(body.ok, true)
+  assert.equal(body.plugin.name, '@sealwax/dsh-trust-platform')
+  assert.equal(body.plugin.mode, 'sandbox')
+  assert.equal(body.plugin.source, 'in-memory-sandbox')
+  assert.equal(body.plugin.authoritative, false)
+  assert.equal(body.counts.identities, 1)
+  assert.equal(body.health.engine, 'embedded')
 })
 
-test('health endpoint returns the plugin snapshot without the record counts', async () => {
-  const ctx = createHostContext()
-  apply(ctx, Config({}))
-  const { response, payload } = await callRoute(ctx, createRequest({ url: `${API_PREFIX}/health` }))
-  assert.equal(response.captured.status, 200)
-  assert.equal(payload.ok, true)
-  assert.equal(payload.plugin.mode, 'in-memory')
-  assert.equal(payload.health.status, 'sandbox')
-  assert.equal(payload.overview, undefined)
+test('health reports the embedded engine revision', async () => {
+  const { route } = startHost()
+  const response = await request(route, { url: '/trust-platform/api/health' })
+  assert.equal(response.statusCode, 200)
+  const body = json(response)
+  assert.equal(body.ok, true)
+  assert.equal(body.status, 'ok')
+  assert.equal(body.engine, 'embedded')
+  assert.equal(body.mode, 'sandbox')
+  assert.equal(typeof body.schema_revision, 'string')
+  assert.equal(typeof body.started_at, 'string')
 })
 
-test('requests rejected by the browser-session fence never reach plugin state', async () => {
-  const ctx = createHostContext({ rejection: 403 })
-  apply(ctx, Config({}))
-  const { response, payload } = await callRoute(ctx, createRequest({ url: `${API_PREFIX}/overview` }))
-  assert.equal(response.captured.status, 403)
-  assert.equal(payload.ok, false)
-  assert.equal(payload.error_code, 'FORBIDDEN')
-  assert.equal(payload.overview, undefined)
+test('settings are readable and never expose secrets', async () => {
+  const { route } = startHost()
+  const response = await request(route, { url: '/trust-platform/api/settings' })
+  assert.equal(response.statusCode, 200)
+  const body = json(response)
+  assert.equal(body.ok, true)
+  assert.equal(body.editable, true)
+  assert.equal(body.mode, 'sandbox')
+  assert.equal(body.settings.actorDid, 'system:dsh-web')
+  assert.equal(body.settings.allowInterventionExecution, false)
+  assert.equal(typeof body.settings.policy.riskDeferThreshold, 'number')
+  assert.equal(typeof body.defaults.actorDid, 'string')
+  assert.equal(response.body.includes('token'), false)
 })
 
-test('non-GET methods and unknown routes are refused', async () => {
-  const ctx = createHostContext()
-  apply(ctx, Config({}))
-  const post = await callRoute(ctx, createRequest({ method: 'POST', url: `${API_PREFIX}/overview` }))
-  assert.equal(post.response.captured.status, 405)
-  assert.equal(post.response.captured.headers.allow, 'GET, HEAD')
-  const unknown = await callRoute(ctx, createRequest({ url: `${API_PREFIX}/wallet` }))
-  assert.equal(unknown.response.captured.status, 404)
-  assert.equal(unknown.payload.error_code, 'NOT_FOUND')
+test('settings updates apply immediately and persist in the engine', async () => {
+  const { ctx, route } = startHost()
+  const response = await request(route, {
+    method: 'PUT',
+    url: '/trust-platform/api/settings',
+    body: { actorDid: 'system:edited', allowInterventionExecution: true, policy: { riskDeferThreshold: 0.55 } },
+  })
+  assert.equal(response.statusCode, 200)
+  const body = json(response)
+  assert.equal(body.ok, true)
+  assert.equal(body.settings.actorDid, 'system:edited')
+  assert.equal(body.settings.allowInterventionExecution, true)
+  assert.equal(body.settings.policy.riskDeferThreshold, 0.55)
+  assert.equal(typeof body.saved_at, 'string')
+  assert.equal(ctx.services.get('trustPlane').settingsSnapshot().settings.actorDid, 'system:edited')
 })
 
-test('registerUiRoute is a no-op when the context has no inject surface', () => {
-  const ctx = { tools: { register() {} } }
-  assert.equal(registerUiRoute(ctx, { getOverview: async () => ({}) }), undefined)
-  apply(ctx, Config({}))
+test('invalid settings patches are rejected with 422 details', async () => {
+  const { route } = startHost()
+  const response = await request(route, {
+    method: 'PUT',
+    url: '/trust-platform/api/settings',
+    body: { policy: { riskBlockThreshold: 0.2 } },
+  })
+  assert.equal(response.statusCode, 422)
+  const body = json(response)
+  assert.equal(body.ok, false)
+  assert.equal(body.error_code, 'VALIDATION_ERROR')
+  assert.equal(typeof body.message, 'string')
+})
+
+test('reset clears records but keeps settings', async () => {
+  const { ctx, route } = startHost()
+  await run(ctx, 'register_identity', {
+    domain_id: 'bank.example',
+    subject_id: 'agent-1',
+    display_name: 'Agent One',
+  })
+  const missingConfirm = await request(route, {
+    method: 'POST',
+    url: '/trust-platform/api/reset',
+    body: { confirm: false },
+  })
+  assert.equal(missingConfirm.statusCode, 400)
+  assert.equal(json(missingConfirm).error_code, 'VALIDATION_ERROR')
+
+  const response = await request(route, { method: 'POST', url: '/trust-platform/api/reset', body: { confirm: true } })
+  assert.equal(response.statusCode, 200)
+  const body = json(response)
+  assert.equal(body.ok, true)
+  assert.equal(body.counts.identities, 0)
+  assert.equal(ctx.services.get('trustPlane').settingsSnapshot().settings.actorDid, 'system:dsh-web')
+})
+
+test('requests rejected by the browser-session fence never reach the engine', async () => {
+  const { route } = startHost({ requestRejection: () => 403 })
+  const response = await request(route)
+  assert.equal(response.statusCode, 403)
+  const body = json(response)
+  assert.equal(body.ok, false)
+  assert.equal(body.error_code, 'FORBIDDEN')
+  assert.equal(response.body.includes('plugin'), false)
+})
+
+test('unsupported methods and unknown routes are refused', async () => {
+  const { route } = startHost()
+  const postOverview = await request(route, { method: 'POST', url: '/trust-platform/api/overview' })
+  assert.equal(postOverview.statusCode, 405)
+  const methodBody = json(postOverview)
+  assert.equal(methodBody.error_code, 'METHOD_NOT_ALLOWED')
+  assert.equal(methodBody.details.allow, 'GET, HEAD')
+
+  const unknown = await request(route, { url: '/trust-platform/api/nope' })
+  assert.equal(unknown.statusCode, 404)
+  assert.equal(json(unknown).error_code, 'NOT_FOUND')
+})
+
+test('HEAD health responses carry headers without a body', async () => {
+  const { route } = startHost()
+  const response = await request(route, { method: 'HEAD', url: '/trust-platform/api/health' })
+  assert.equal(response.statusCode, 200)
+  assert.equal(response.body, '')
+  assert.equal(Number(response.headers['content-length']) > 0, true)
 })

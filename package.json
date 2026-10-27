@@ -1,22 +1,25 @@
 {
   "name": "@sealwax/dsh-trust-platform",
-  "version": "0.5.0",
-  "description": "Trusted identity and payment-governance tools for multi-agent cross-border payment workflows.",
+  "version": "0.6.0",
+  "description": "Embedded identity and payment-governance trust plane for multi-agent cross-border payment workflows.",
   "type": "module",
   "main": "src/index.js",
+  "icon": "./icon.svg",
   "exports": {
     ".": "./src/index.js",
     "./client": {
       "default": "./lib/client.js"
     },
-    "./control-plane-client": "./src/control-plane-client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
     "lib",
     "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
     "README.md",
     "docs",
     "LICENSE"

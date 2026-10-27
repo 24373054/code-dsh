@@ -249,39 +249,6 @@ export function matchesPlugin(subject) {
 }
 
 /**
- * Project the display-safe configuration block the Host reports under
- * `plugin.config`. Only the documented fields are read and the bearer token is
- * never part of the contract; missing or malformed fields become `null` so the
- * settings page can render a placeholder instead of inventing a value.
- *
- * @param {unknown} plugin `plugin` object of an overview snapshot.
- * @returns {{
- *   baseUrl: string | null,
- *   actorDid: string | null,
- *   timeoutMs: number | null,
- *   allowInterventionExecution: boolean | null,
- *   tokenConfigured: boolean | null,
- * } | null} null when the Host reports no configuration at all.
- */
-export function readConfig(plugin) {
-  const config = isObject(plugin) && isObject(plugin.config) ? plugin.config : null
-  if (!config) return null
-  return {
-    baseUrl: isNonEmptyString(config.base_url) ? config.base_url : null,
-    actorDid: isNonEmptyString(config.actor_did) ? config.actor_did : null,
-    timeoutMs: typeof config.timeout_ms === 'number' && Number.isFinite(config.timeout_ms)
-      ? config.timeout_ms
-      : null,
-    allowInterventionExecution: typeof config.allow_intervention_execution === 'boolean'
-      ? config.allow_intervention_execution
-      : null,
-    tokenConfigured: typeof config.token_configured === 'boolean'
-      ? config.token_configured
-      : null
-  }
-}
-
-/**
  * Unwrap one overview response body.
  *
  * The documented Host contract returns the snapshot flattened at the top level
