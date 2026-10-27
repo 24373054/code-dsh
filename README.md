@@ -145,5 +145,10 @@ npm run pack:check   # rebuild the browser bundle, then npm pack --dry-run
 ```
 
 The tests never use the network or a live server; the bundle test rebuilds `lib/client.js` first so
-the committed artifact and the source cannot drift. Requires DSH `>=0.2.1-rc.3 <0.3.0`
+the committed artifact and the source cannot drift. `tests/scenario-full-chain.test.js` runs the
+complete DID → credential → payment task → delegation → authorization → operation event → risk →
+intervention → case → report chain through the registered tools and the browser API, asserts that
+every fail-closed path stays closed (a `DENY` authorization can never create a task, unsigned events
+never verify as `VALID`), and checks that the whole chain survives in `state.json`.
+Requires DSH `>=0.2.1-rc.3 <0.3.0`
 (`engines.dsh`) and `@deepseek-ai/cordis ~4.0.5`.

@@ -234,6 +234,23 @@ test('reset clears records but keeps settings', async () => {
   assert.equal(body.ok, true)
   assert.equal(body.counts.identities, 0)
   assert.equal(ctx.services.get('trustPlane').settingsSnapshot().settings.actorDid, 'system:dsh-web')
+
+  // Regression: reset must swap records in place, not detach the collections the
+  // sub-engines captured at construction. Registering right after a reset has to
+  // be visible to every tool and to the aggregate counts.
+  const again = await run(ctx, 'register_identity', {
+    domain_id: 'bank.example',
+    subject_id: 'agent-2',
+    display_name: 'Agent Two',
+  })
+  assert.equal(again.ok, true)
+  assert.equal(again.identity.did, 'did:trust:bank.example:agent-2')
+  const status = await run(ctx, 'get_identity_status', { did: 'did:trust:bank.example:agent-2' })
+  assert.equal(status.ok, true)
+  assert.equal(status.identity.status, 'ACTIVE')
+  assert.equal(ctx.services.get('trustPlane').counts().identities, 1)
+  const overview = json(await request(route))
+  assert.equal(overview.counts.identities, 1)
 })
 
 test('requests rejected by the browser-session fence never reach the engine', async () => {

@@ -399,6 +399,10 @@ export function createInitialState(settings = {}) {
   }
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
 export function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value))
 }
@@ -413,6 +417,9 @@ export class Engine {
     // Keep startup settings authoritative for keys that are deployment scoped,
     // while previously persisted UI overrides remain in force for policy.
     this.startupSettings = normalizeSettings(settings)
+    // A freshly created state has no persisted overrides yet; record the effective
+    // startup settings so the state file is self-describing after the first save.
+    if (loaded === null || loaded.schema_version !== SCHEMA_VERSION) this.state.settings = clone(this.startupSettings)
     this.savePending = false
   }
 
@@ -546,7 +553,27 @@ export class Engine {
     const settings = clone(this.state.settings || {})
     const next = createInitialState({})
     next.settings = settings
-    this.state = next
+    // Keep the state object and its collection objects stable: the sub-engines
+    // capture `engine.collection(name)` once at construction, so replacing the
+    // collections wholesale would leave their tools reading detached records.
+    const state = this.state
+    for (const key of Object.keys(state)) {
+      if (!(key in next)) delete state[key]
+    }
+    for (const [key, value] of Object.entries(next)) {
+      const current = state[key]
+      if (Array.isArray(value)) {
+        if (Array.isArray(current)) current.splice(0, current.length)
+        else state[key] = value
+        continue
+      }
+      if (isPlainObject(value) && isPlainObject(current)) {
+        for (const name of Object.keys(current)) delete current[name]
+        Object.assign(current, value)
+        continue
+      }
+      state[key] = value
+    }
     this.save()
     return this.counts()
   }

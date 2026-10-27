@@ -1,6 +1,6 @@
 {
   "name": "@sealwax/dsh-trust-platform",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Embedded identity and payment-governance trust plane for multi-agent cross-border payment workflows.",
   "type": "module",
   "main": "src/index.js",
