@@ -6,7 +6,7 @@
  * and the browser API share the same engine and the same persisted state.
  */
 import { TOOL_DEFS } from './engine/tool-defs.js'
-import { ServiceError, domainFromDid, subjectFromDid } from './engine/core.js'
+import { ServiceError, domainFromDid, fail, subjectFromDid } from './engine/core.js'
 import {
   EMBEDDED_SOURCE,
   engineTool,
@@ -328,6 +328,19 @@ const HANDLERS = {
     return result({ delegations })
   },
 
+  read_delegation_chain: (plane, args) => {
+    const read = plane.delegations.readChain(args.delegation_id, { actor: actorOf(plane, args) })
+    return result({
+      delegation: read.delegation,
+      chain: read.chain,
+      chain_length: read.chain_length,
+      root_id: read.root_id,
+      root_issuer_did: read.root_issuer_did,
+      chain_trustworthy: read.chain_trustworthy,
+      effective: read.effective,
+    })
+  },
+
   verify_operation_event: (plane, args) => {
     const verification = plane.events.verify(args.event_id)
     return result({ verification })
@@ -478,6 +491,72 @@ const HANDLERS = {
   transition_payment_task: (plane, args) => {
     const task = plane.tasks.transition(args.task_id, { status: args.status, reason: args.reason })
     return result({ task })
+  },
+
+  /**
+   * Close the settlement loop with cryptographic evidence.
+   *
+   * The tool signs a FINAL SETTLE event with the requester's embedded Ed25519
+   * key, verifies it (signature + identity + authorization + ledger) and only
+   * advances the task to CONFIRMED -> AUDITED -> CLOSED when verification is
+   * VALID. Settlement is never claimed by bookkeeping alone.
+   */
+  settle_payment_task: (plane, args, exec) => {
+    const task = plane.tasks.get(args.task_id)
+    const status = String(task.status || '').toUpperCase()
+    if (status !== 'SUBMITTED') {
+      fail('TASK_NOT_SETTLEABLE', `task ${task.id} is ${status}; settlement requires SUBMITTED`, { status: 409 })
+    }
+    const actor = optionalText(args.actor_did) ?? task.requester_did
+    const amount = finiteNumber(args.amount) ?? finiteNumber(task.amount)
+    if (amount === null || amount <= 0) {
+      fail('VALIDATION_ERROR', 'amount must be a positive number', { status: 422 })
+    }
+    const suffix = optionalText(args.settlement_ref) ?? plane.engine.id('settle')
+    const sourceLedger = plainObject(args.source_ledger) ?? {
+      scheme: 'embedded-ledger',
+      finality: 'FINAL',
+      reference: plane.engine.id('ledger'),
+    }
+    const draft = {
+      task_id: task.id,
+      event_type: 'SETTLE',
+      actor_did: actor,
+      payload: { amount, currency: task.asset_id, asset_id: task.asset_id, settlement_ref: suffix },
+      source_ref: `settle-${task.id}-${suffix}`.slice(0, 250),
+      finality: 'FINAL',
+      event_time: args.event_time,
+      observed_at: args.observed_at,
+      trace_id: args.trace_id,
+      source_ledger: sourceLedger,
+      policy_version: args.policy_version,
+    }
+    const signed = plane.events.signDraft({ ...draft, event_id: optionalText(args.event_id) }, { ...callOptions(exec, plane), actor })
+    const event = plane.events.create(
+      { ...draft, event_id: signed.event_id, observed_at: signed.observed_at, signature: signed.signature },
+      { ...callOptions(exec, plane), actor },
+    )
+    const verification = plane.events.verify(event.id, { ...callOptions(exec, plane), actor })
+    const overall = String(verification.overall_status || '').toUpperCase()
+    if (overall !== 'VALID') {
+      fail('SETTLEMENT_NOT_PROVEN', `settlement verification is ${overall}, not VALID`, { status: 409 })
+    }
+    const transitions = []
+    const baseKey = writeOptions(exec, plane).idempotencyKey ?? 'settle'
+    for (const nextStatus of ['CONFIRMED', 'AUDITED', 'CLOSED']) {
+      const updated = plane.tasks.transition(
+        task.id,
+        { status: nextStatus, reason: nextStatus === 'CLOSED' ? `signed FINAL settlement verified: ${event.id}` : 'settlement confirmed' },
+        { ...callOptions(exec, plane), actor: task.requester_did, idempotencyKey: `${baseKey}:${nextStatus}` },
+      )
+      transitions.push({ status: updated.status, updated_at: updated.updated_at })
+    }
+    return result({
+      event,
+      verification,
+      task: plane.tasks.get(task.id),
+      settlement: { proof: 'signed-final-settlement', event_id: event.id, ledger: sourceLedger, transitions },
+    })
   },
 
   create_trace_report: (plane, args) => {

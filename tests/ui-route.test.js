@@ -131,7 +131,7 @@ test('browser API registers one fenced prefix route', () => {
   assert.equal(route.kind, 'prefix')
   assert.equal(route.path, '/trust-platform/api')
   assert.equal(typeof route.handler, 'function')
-  assert.equal(ctx.registeredTools.size, 58)
+  assert.equal(ctx.registeredTools.size, 60)
 })
 
 test('overview reports embedded engine state and counts', async () => {

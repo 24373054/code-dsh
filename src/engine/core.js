@@ -7,7 +7,7 @@
  * state container that every engine module shares.
  */
 import { createHash, createPrivateKey, createPublicKey, randomBytes, sign as edSign, verify as edVerify } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -300,19 +300,117 @@ export function defaultDataDir() {
   return join(home, 'plugin-data', 'dsh-trust-platform')
 }
 
+/** Expected top-level collections; a non-object value triggers recovery. */
+const STATE_COLLECTIONS = Object.freeze([
+  'identities',
+  'identity_keys',
+  'credentials',
+  'credential_status',
+  'delegations',
+  'tasks',
+  'events',
+  'verifications',
+  'risk_evidence',
+  'interventions',
+  'receipts',
+  'evidence',
+  'anchors',
+  'cases',
+  'case_snapshots',
+  'reports',
+  'knowledge',
+  'knowledge_chunks',
+  'feedback',
+  'policies',
+  'models',
+  'idempotency',
+  'counters',
+])
+
+const CORRUPT_BACKUP_MARKER = '.corrupt-'
+
+function backupTimestamp(value) {
+  const date = value instanceof Date ? value : new Date(value)
+  return date.toISOString().replace(/[:.]/g, '-')
+}
+
+/**
+ * Classify a parsed state file.
+ *
+ * Returns null when the payload is loadable, otherwise `{ kind }` describing
+ * the recovery the store must perform: 'corrupt' (unparseable JSON),
+ * 'invalid-shape' (unexpected structure) or 'future-schema' (newer version).
+ */
+function stateFileProblem(parsed) {
+  if (!isPlainObject(parsed)) return { kind: 'invalid-shape' }
+  const version = parsed.schema_version
+  if (typeof version !== 'number' || !Number.isInteger(version)) return { kind: 'invalid-shape' }
+  if (version > SCHEMA_VERSION) return { kind: 'future-schema' }
+  if (version < SCHEMA_VERSION) return { kind: 'invalid-shape' }
+  if (parsed.settings !== undefined && !isPlainObject(parsed.settings)) return { kind: 'invalid-shape' }
+  for (const name of STATE_COLLECTIONS) {
+    const value = parsed[name]
+    if (value !== undefined && !isPlainObject(value)) return { kind: 'invalid-shape' }
+  }
+  if (parsed.activity !== undefined && !Array.isArray(parsed.activity)) return { kind: 'invalid-shape' }
+  return null
+}
+
 export class FileStore {
   constructor(dataDir) {
     this.dataDir = dataDir
     this.file = join(dataDir, 'state.json')
     this.timer = null
     this.pending = null
+    this.recovery = null
+    this.write_error = null
+    this.lastSavedAt = null
+    this.schemaVersion = SCHEMA_VERSION
+  }
+
+  /**
+   * Best-effort copy of a damaged state file to `state.json.corrupt-<ts>`,
+   * then report the recovery so the caller can start from a fresh state.
+   */
+  recoverFromDamage(kind) {
+    const occurredAt = nowIso()
+    let backupPath = null
+    try {
+      backupPath = `${this.file}${CORRUPT_BACKUP_MARKER}${backupTimestamp(new Date(occurredAt))}`
+      copyFileSync(this.file, backupPath)
+    } catch {
+      backupPath = null
+    }
+    this.recovery = { kind, backupPath, occurred_at: occurredAt }
+    this.schemaVersion = SCHEMA_VERSION
+    return null
   }
 
   load() {
     try {
       if (!existsSync(this.file)) return null
-      const parsed = JSON.parse(readFileSync(this.file, 'utf8'))
-      return parsed && typeof parsed === 'object' ? parsed : null
+      let text = null
+      try {
+        text = readFileSync(this.file, 'utf8')
+      } catch {
+        return this.recoverFromDamage('corrupt')
+      }
+      let parsed = null
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        return this.recoverFromDamage('corrupt')
+      }
+      const problem = stateFileProblem(parsed)
+      if (problem) return this.recoverFromDamage(problem.kind)
+      try {
+        const stats = statSync(this.file)
+        this.lastSavedAt = new Date(stats.mtimeMs).toISOString()
+      } catch {
+        // Storage metadata is cosmetic; a loadable state file is still usable.
+      }
+      this.schemaVersion = parsed.schema_version
+      return parsed
     } catch {
       return null
     }
@@ -320,33 +418,78 @@ export class FileStore {
 
   save(state) {
     this.pending = state
+    if (state && Number.isInteger(state.schema_version)) this.schemaVersion = state.schema_version
     if (this.timer) return
     this.timer = setTimeout(() => this.flush(), 120)
     if (typeof this.timer.unref === 'function') this.timer.unref()
   }
 
+  /**
+   * Synchronously persist the pending state with an atomic temp-file + rename.
+   *
+   * On failure the previous state file is kept, `write_error` is recorded and
+   * the pending state is retained so a later flush can retry. Never throws and
+   * never leaves a timer scheduled behind a completed write.
+   */
   flush() {
     if (this.timer) {
       clearTimeout(this.timer)
       this.timer = null
     }
-    if (!this.pending) return
+    if (!this.pending) return false
     const state = this.pending
-    this.pending = null
+    const temporary = `${this.file}.${process.pid}.tmp`
     try {
       mkdirSync(dirname(this.file), { recursive: true })
-      const temporary = `${this.file}.${process.pid}.tmp`
       writeFileSync(temporary, JSON.stringify(state), 'utf8')
       renameSync(temporary, this.file)
-    } catch {
-      // Persistence is best effort: a failed write must never break a tool call.
+      this.pending = null
+      this.write_error = null
+      this.lastSavedAt = nowIso()
+      return true
+    } catch (error) {
+      try {
+        if (existsSync(temporary)) unlinkSync(temporary)
+      } catch {
+        // Cleanup is best effort; the failure below is what callers act on.
+      }
+      this.write_error = {
+        code: 'STATE_WRITE_FAILED',
+        message: error && error.message ? String(error.message) : String(error),
+        at: nowIso(),
+      }
+      return false
     }
+  }
+
+  /** Cheap storage metadata for the browser settings/storage panel. Never throws. */
+  describe() {
+    const info = {
+      data_dir: this.dataDir ?? null,
+      state_file: this.file ?? null,
+      schema_version: this.schemaVersion ?? SCHEMA_VERSION,
+      exists: false,
+      file_size_bytes: 0,
+      last_saved_at: this.lastSavedAt ?? null,
+      recovery: this.recovery ?? null,
+      write_error: this.write_error ?? null,
+    }
+    try {
+      const stats = statSync(this.file)
+      info.exists = true
+      info.file_size_bytes = stats.size
+      if (!info.last_saved_at) info.last_saved_at = new Date(stats.mtimeMs).toISOString()
+    } catch {
+      info.exists = false
+    }
+    return info
   }
 }
 
 export class MemoryStore {
   constructor() {
     this.state = null
+    this.schemaVersion = SCHEMA_VERSION
   }
 
   load() {
@@ -355,9 +498,25 @@ export class MemoryStore {
 
   save(state) {
     this.state = state
+    if (state && Number.isInteger(state.schema_version)) this.schemaVersion = state.schema_version
   }
 
-  flush() {}
+  flush() {
+    return false
+  }
+
+  describe() {
+    return {
+      data_dir: null,
+      state_file: null,
+      schema_version: this.schemaVersion ?? SCHEMA_VERSION,
+      exists: false,
+      file_size_bytes: 0,
+      last_saved_at: null,
+      recovery: null,
+      write_error: null,
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -451,7 +610,8 @@ export class Engine {
   }
 
   flush() {
-    if (this.store) this.store.flush()
+    if (!this.store) return false
+    return this.store.flush()
   }
 
   now() {

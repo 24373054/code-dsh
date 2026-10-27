@@ -149,7 +149,31 @@ export const en = Object.freeze({
   'settings.error.thresholds': 'Risk thresholds must satisfy block ≥ defer ≥ throttle.',
   'settings.error.validation': 'The host rejected the change: {message}',
   'settings.error.invalidDraft': 'The form is incomplete.',
-  'settings.error.details': 'Details: {details}'
+  'settings.error.details': 'Details: {details}',
+  'settings.error.export': 'The state export failed.',
+
+  // Data management: storage facts, export and guarded reset.
+  'settings.storage.title': 'Data management',
+  'settings.storage.description': 'Where the embedded engine keeps its state, plus export and reset actions.',
+  'settings.storage.dataDir': 'Data directory',
+  'settings.storage.stateFile': 'State file',
+  'settings.storage.fileSize': 'Size',
+  'settings.storage.exists': 'State file present',
+  'settings.storage.missing': 'State file not created yet',
+  'settings.storage.lastSavedAt': 'Last saved',
+  'settings.storage.schemaVersion': 'Schema revision',
+  'settings.storage.recovery': 'Recovery',
+  'settings.storage.recoveryClean': 'No recovery required',
+  'settings.storage.recoveryDetected': 'Restored from backup',
+  'settings.storage.backupPath': 'Backup file',
+  'settings.storage.writeError': 'Write error: {message}',
+  'settings.storage.loading': 'Loading storage details…',
+  'settings.storage.refresh': 'Refresh storage',
+  'settings.storage.unavailable': 'Storage details are not available in this plugin mode.',
+  'settings.action.export': 'Export data',
+  'settings.action.exporting': 'Exporting…',
+  'settings.reset.confirmInput': 'Type RESET to enable the reset button.',
+  'settings.feedback.exported': 'Exported {filename}.'
 })
 
 /** @type {Record<string, string>} */
@@ -288,5 +312,29 @@ export const zh = Object.freeze({
   'settings.error.thresholds': '风险阈值需满足 阻断 ≥ 延后 ≥ 限流。',
   'settings.error.validation': '宿主拒绝了该修改：{message}',
   'settings.error.invalidDraft': '表单内容不完整。',
-  'settings.error.details': '详情：{details}'
+  'settings.error.details': '详情：{details}',
+  'settings.error.export': '状态数据导出失败。',
+
+  // 数据管理：存储信息、导出与受保护的重置。
+  'settings.storage.title': '数据管理',
+  'settings.storage.description': '内置引擎状态的存放位置，以及导出与重置操作。',
+  'settings.storage.dataDir': '数据目录',
+  'settings.storage.stateFile': '状态文件',
+  'settings.storage.fileSize': '大小',
+  'settings.storage.exists': '状态文件已创建',
+  'settings.storage.missing': '状态文件尚未创建',
+  'settings.storage.lastSavedAt': '最后保存',
+  'settings.storage.schemaVersion': 'Schema 版本',
+  'settings.storage.recovery': '恢复状态',
+  'settings.storage.recoveryClean': '无需恢复',
+  'settings.storage.recoveryDetected': '已从备份恢复',
+  'settings.storage.backupPath': '备份文件',
+  'settings.storage.writeError': '写入异常：{message}',
+  'settings.storage.loading': '正在加载存储信息…',
+  'settings.storage.refresh': '刷新存储信息',
+  'settings.storage.unavailable': '当前插件模式不提供存储信息。',
+  'settings.action.export': '导出数据',
+  'settings.action.exporting': '导出中…',
+  'settings.reset.confirmInput': '输入 RESET 以启用重置按钮。',
+  'settings.feedback.exported': '已导出 {filename}。'
 })

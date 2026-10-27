@@ -20,13 +20,18 @@ export const API_PREFIX = '/trust-platform/api'
 /** Maximum accepted JSON body size for settings updates. */
 const MAX_BODY_BYTES = 128 * 1024
 
+/** Maximum size of one state export download (mirrored by the browser half). */
+const MAX_EXPORT_BYTES = 8 * 1024 * 1024
+
 /**
  * Register the browser API.
  *
  * @param ctx - plugin context.
- * @param api - `{ getOverview, getHealth, getSettings, updateSettings, reset }`
- *   providers backed by the embedded trust plane. All are optional; a missing
- *   provider yields `503 NOT_CONFIGURED` for that route.
+ * @param api - `{ getOverview, getHealth, getSettings, updateSettings, reset,
+ *   storageInfo, exportState }` providers backed by the embedded trust plane.
+ *   All are optional; a missing provider yields `503 NOT_CONFIGURED` for that
+ *   route, or the route-specific `503 STORAGE_UNAVAILABLE` /
+ *   `503 EXPORT_UNAVAILABLE` for the optional data-management providers.
  * @returns the injection fiber, or `undefined` when the surface is unavailable.
  */
 export function registerUiRoute(ctx, api = {}) {
@@ -126,6 +131,18 @@ async function handleRequest(req, res, { connection, api }) {
       respond(res, method, 200, { ok: true, counts: asObject(counts) })
       return
     }
+    if (pathname === `${API_PREFIX}/storage`) {
+      requireMethod(method, ['GET', 'HEAD'])
+      const [mode, storage] = await Promise.all([resolveMode(api), provideStorage(api.storageInfo)])
+      respond(res, method, 200, { ok: true, mode, storage: asObject(storage) })
+      return
+    }
+    if (pathname === `${API_PREFIX}/export`) {
+      requireMethod(method, ['GET', 'HEAD'])
+      const snapshot = await provideExport(api.exportState)
+      sendDownload(method, res, snapshot)
+      return
+    }
     sendJson(res, 404, { ok: false, error_code: 'NOT_FOUND', message: 'unknown trust-platform route' })
   } catch (error) {
     const status = error instanceof HttpError ? error.status : typeof error?.status === 'number' ? error.status : 500
@@ -161,6 +178,48 @@ async function provide(provider) {
     throw new HttpError(503, 'NOT_CONFIGURED', 'this browser route is not available in the current plugin mode')
   }
   return provider()
+}
+
+/** Resolve the optional storage provider; absence is a storage-specific 503. */
+function provideStorage(provider) {
+  if (typeof provider !== 'function') {
+    throw new HttpError(503, 'STORAGE_UNAVAILABLE', 'storage details are not available in the current plugin mode')
+  }
+  return provider()
+}
+
+/** Resolve the optional export provider; absence is an export-specific 503. */
+function provideExport(provider) {
+  if (typeof provider !== 'function') {
+    throw new HttpError(503, 'EXPORT_UNAVAILABLE', 'state export is not available in the current plugin mode')
+  }
+  return provider()
+}
+
+/**
+ * Resolve the engine mode for the storage summary.
+ *
+ * The data-management route reports the current engine mode next to the storage
+ * card. The mode is derived from the already-registered health/overview
+ * providers; a missing provider or a provider that throws simply yields `null`
+ * so the storage card still renders.
+ *
+ * @param api - route providers.
+ * @returns {'embedded'|'sandbox'|string|null} the reported mode.
+ */
+async function resolveMode(api) {
+  for (const provider of [api.getHealth, api.getOverview]) {
+    if (typeof provider !== 'function') continue
+    try {
+      const value = asObject(await provider())
+      const nested = asObject(value.plugin)
+      if (typeof value.mode === 'string') return value.mode
+      if (typeof nested.mode === 'string') return nested.mode
+    } catch {
+      // The storage card is independent of the mode; keep trying the next provider.
+    }
+  }
+  return null
 }
 
 /** Plain object or empty object. */
@@ -211,6 +270,49 @@ function fence(connection, req) {
   } catch {
     return 403
   }
+}
+
+/**
+ * Serialize an exported state snapshot as a capped JSON attachment.
+ *
+ * The provider returns `{ exported_at, version, schema_version, state }`; the
+ * download body wraps it in the canonical `{ ok: true, ... }` envelope used by
+ * every browser route. The snapshot never contains secrets.
+ *
+ * @param method - request method (HEAD writes headers only).
+ * @param res - response sink.
+ * @param snapshot - exported snapshot returned by the export provider.
+ */
+function sendDownload(method, res, snapshot) {
+  const payload = JSON.stringify({ ok: true, ...asObject(snapshot) })
+  const size = Buffer.byteLength(payload)
+  if (size > MAX_EXPORT_BYTES) {
+    throw new HttpError(413, 'PAYLOAD_TOO_LARGE', 'the exported state exceeds the 8 MiB download limit')
+  }
+  const filename = exportFilename(new Date())
+  res.writeHead(200, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': size,
+    'content-disposition': `attachment; filename="${filename}"`,
+    'cache-control': 'no-store',
+  })
+  res.end(method === 'HEAD' ? undefined : payload)
+}
+
+/**
+ * Build `trust-platform-state-<YYYYMMDD-HHmmss>.json` from the download time.
+ *
+ * The timestamp is UTC so the filename is stable across the Host time zone.
+ *
+ * @param date - download time.
+ * @returns {string} attachment filename.
+ */
+function exportFilename(date) {
+  const moment = date instanceof Date && Number.isFinite(date.getTime()) ? date : new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  const day = `${moment.getUTCFullYear()}${pad(moment.getUTCMonth() + 1)}${pad(moment.getUTCDate())}`
+  const clock = `${pad(moment.getUTCHours())}${pad(moment.getUTCMinutes())}${pad(moment.getUTCSeconds())}`
+  return `trust-platform-state-${day}-${clock}.json`
 }
 
 /** Write one response, honoring HEAD semantics. */

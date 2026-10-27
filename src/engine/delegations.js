@@ -512,11 +512,67 @@ export function createDelegationEngine(engine) {
     return authorizeResult(record, task, body, 'ALLOW', [reason('AUTHORIZED', 'all delegation scopes are satisfied')])
   }
 
+  /**
+   * Read one delegation together with its full parent chain.
+   *
+   * The chain is returned root -> leaf. Effective scopes are the intersection of
+   * the chain: a child can never widen actions, amount, daily amount or window
+   * beyond its parents. `chain_trustworthy` is false when a link is revoked, the
+   * chain is cyclic or the root issuer is not the task requester, so callers
+   * must treat that as "not trustworthy" instead of assuming validity.
+   */
+  function readChain(id, payload = {}) {
+    const target = textField(id, 'delegation_id', { min: 1, max: 250 })
+    const body = plainObject(payload) ? payload : {}
+    const record = delegations[target]
+    if (!record) fail('DELEGATION_NOT_FOUND', 'delegation not found', { status: 404 })
+    const task = tasks[record.task_id]
+    if (!task) fail('TASK_NOT_FOUND', 'payment task not found', { status: 404 })
+    requireTaskAccess(task, actorOf(body))
+    const store = []
+    const seen = new Set()
+    let current = record
+    while (current) {
+      if (seen.has(current.id)) fail('DELEGATION_CHAIN_CYCLE', 'delegation parent chain contains a cycle', { status: 409 })
+      seen.add(current.id)
+      store.push(current)
+      current = current.parent_id ? delegations[current.parent_id] : null
+    }
+    const chain = store.reverse()
+    const root = chain[0]
+    let actions = Array.isArray(record.actions) ? record.actions.map((action) => String(action).toUpperCase()) : []
+    for (const link of chain.slice(0, -1)) {
+      const scoped = new Set((Array.isArray(link.actions) ? link.actions : []).map((action) => String(action).toUpperCase()))
+      actions = actions.filter((action) => scoped.has(action))
+    }
+    const amountLimits = chain.map((link) => numeric(link.amount_limit)).filter((value) => value !== null)
+    const dailyLimits = chain.map((link) => numeric(link.daily_limit)).filter((value) => value !== null)
+    const starts = chain.map((link) => parseIso(link.valid_from)).filter(Boolean).map((date) => date.getTime())
+    const ends = chain.map((link) => parseIso(link.valid_to)).filter(Boolean).map((date) => date.getTime())
+    const effective = {
+      actions,
+      amount_limit: amountLimits.length > 0 ? amountString(Math.min(...amountLimits)) : null,
+      daily_limit: dailyLimits.length > 0 ? amountString(Math.min(...dailyLimits)) : null,
+      valid_from: starts.length > 0 ? engine.iso(new Date(Math.max(...starts))) : null,
+      valid_to: ends.length > 0 ? engine.iso(new Date(Math.min(...ends))) : null,
+    }
+    return {
+      delegation: delegationResponse(record),
+      chain: chain.map(delegationResponse),
+      chain_length: chain.length,
+      root_id: root.id,
+      root_issuer_did: root.issuer_did,
+      chain_trustworthy: record.status === 'ACTIVE' && chainValid(record, task),
+      effective,
+    }
+  }
+
   return {
     create,
     list,
     get,
     revoke,
     authorize,
+    readChain,
   }
 }

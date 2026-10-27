@@ -976,7 +976,7 @@ test('delegations: factories expose exactly the documented methods', () => {
   const { identity, credentials, delegations } = setup()
   assert.deepEqual(Object.keys(identity).sort(), ['admit', 'getDid', 'listDidKeys', 'listDids', 'registerDid', 'rotateDid', 'setDidStatus'])
   assert.deepEqual(Object.keys(credentials).sort(), ['get', 'issue', 'setStatus', 'statusHistory', 'verify'])
-  assert.deepEqual(Object.keys(delegations).sort(), ['authorize', 'create', 'get', 'list', 'revoke'])
+  assert.deepEqual(Object.keys(delegations).sort(), ['authorize', 'create', 'get', 'list', 'readChain', 'revoke'])
 })
 
 /* ------------------------------------------------------------------ */

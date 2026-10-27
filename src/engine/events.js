@@ -8,7 +8,7 @@
  * Verification never silently allows an event: an unsigned dev event, an
  * unknown DID or a missing delegation always produces UNKNOWN/INVALID statuses.
  */
-import { POLICY_VERSION, domainFromDid, fail, newId, nowIso, sha256Hex, sm3Hex, verifySignature } from './core.js'
+import { POLICY_VERSION, domainFromDid, fail, newId, nowIso, sha256Hex, signPayload, sm3Hex, verifySignature } from './core.js'
 
 export const EVENT_TYPES = Object.freeze(['DELEGATE', 'QUOTE', 'SELECT', 'PAYREQ', 'RESULT', 'BRIDGE', 'SETTLE'])
 export const EVENT_FINALITIES = Object.freeze(['OBSERVED', 'CONFIRMED', 'FINAL'])
@@ -390,6 +390,25 @@ function verifiedAtCurrentKey(engine, event) {
   if (verifySignature(publicKey, event.signature, full)) return true
   if (DEV_ALLOW_UNSIGNED_EVENTS && verifySignature(publicKey, event.signature, legacySigningPayload({ ...event, event_id: event.id }))) return true
   return false
+}
+
+/**
+ * Locate signing material (Ed25519 private key + key id) for one DID.
+ *
+ * Only development profiles store private keys; embedded deployments generate
+ * the key pair on registration, so the signing helper can produce real proofs
+ * without ever leaving the process.
+ */
+function signingMaterial(engine, did) {
+  const keys = engine.state.identity_keys ? engine.state.identity_keys[did] : null
+  const list = Array.isArray(keys) ? keys : keys && typeof keys === 'object' ? Object.values(keys) : []
+  const usable = list.filter((key) => key && typeof key.private_key === 'string' && key.private_key)
+  const active = usable.filter((key) => !key.retired_at && String(key.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+  const pool = active.length > 0 ? active : usable
+  if (pool.length === 0) return null
+  const sorted = pool.slice().sort((left, right) => String(left.created_at || '').localeCompare(String(right.created_at || '')))
+  const chosen = sorted[sorted.length - 1]
+  return { privateKey: chosen.private_key, keyId: chosen.key_id ?? null }
 }
 
 function identityStatusFor(engine, event, signatureOk) {
@@ -799,5 +818,43 @@ export function createEventEngine(engine) {
     return verificationResponse(record)
   }
 
-  return { create, get, list, verify }
+  /**
+   * Sign an event draft with the actor's embedded Ed25519 key.
+   *
+   * Returns the fields a caller can merge into a `create` payload so the event
+   * carries a proof the engine can later verify as VALID. It refuses instead of
+   * returning an unsigned draft when the actor has no usable private key, so a
+   * settlement can never be "proven" by an unsigned event.
+   */
+  function signDraft(payload = {}, options = {}) {
+    const actor = actorOf(engine, options)
+    const body = normalizeEventCreate(engine, payload)
+    requireClaimedActor(engine, actor, body.actor_did, '事件 actor_did 必须与调用方 DID 一致')
+    requireActiveDid(engine, body.actor_did)
+    const material = signingMaterial(engine, body.actor_did)
+    if (!material) fail('SIGNING_KEY_NOT_AVAILABLE', `no signing key available for ${body.actor_did}`, { status: 409 })
+    const draft = { ...body, event_id: body.event_id || newId('evt') }
+    const value = signPayload(material.privateKey, eventSigningPayload(draft))
+    return {
+      event_id: draft.event_id,
+      task_id: draft.task_id,
+      event_type: draft.event_type,
+      actor_did: draft.actor_did,
+      payload: draft.payload,
+      source_ref: draft.source_ref,
+      finality: draft.finality,
+      schema_version: draft.schema_version,
+      event_time: draft.event_time,
+      observed_at: draft.observed_at,
+      trace_id: draft.trace_id,
+      counterparty_did: draft.counterparty_did,
+      predecessors: draft.predecessors,
+      evidence_refs: draft.evidence_refs,
+      source_ledger: draft.source_ledger,
+      policy_version: draft.policy_version,
+      signature: { key_id: material.keyId, algorithm: 'Ed25519', value },
+    }
+  }
+
+  return { create, get, list, verify, signDraft }
 }

@@ -26,6 +26,15 @@ export const HEALTH_URL = '/trust-platform/api/health'
 /** Same-origin route deleting engine records after explicit confirmation. */
 export const RESET_URL = '/trust-platform/api/reset'
 
+/** Same-origin route returning data-directory and state-file details. */
+export const STORAGE_URL = '/trust-platform/api/storage'
+
+/** Same-origin route streaming one JSON state export. */
+export const EXPORT_URL = '/trust-platform/api/export'
+
+/** Download cap mirrored from the Host route (8 MiB). */
+export const MAX_EXPORT_BYTES = 8 * 1024 * 1024
+
 /** Upper bound the engine accepts for a single amount field. */
 export const MAX_AMOUNT = 1000000000000
 
@@ -65,6 +74,39 @@ function errorMessage(error) {
     return String(error)
   }
   return String(error)
+}
+
+/**
+ * Project the optional recovery block of the storage card.
+ *
+ * A clean start reports no recovery block at all; after a crash the Host
+ * reports `{ kind, backupPath, occurred_at }`. Every field is display-safe.
+ *
+ * @param {unknown} value
+ * @returns {{ kind: string | null, backupPath: string | null, occurredAt: string | null } | null}
+ */
+function normalizeRecovery(value) {
+  if (!isObject(value)) return null
+  return {
+    kind: isNonEmptyString(value.kind) ? value.kind : null,
+    backupPath: isNonEmptyString(value.backupPath) ? value.backupPath : null,
+    occurredAt: isNonEmptyString(value.occurred_at) ? value.occurred_at : null
+  }
+}
+
+/**
+ * Project the optional write-error block of the storage card.
+ *
+ * @param {unknown} value
+ * @returns {{ code: string | null, message: string | null, at: string | null } | null}
+ */
+function normalizeWriteError(value) {
+  if (!isObject(value)) return null
+  return {
+    code: isNonEmptyString(value.code) ? value.code : null,
+    message: isNonEmptyString(value.message) ? value.message : null,
+    at: isNonEmptyString(value.at) ? value.at : null
+  }
 }
 
 /**
@@ -269,6 +311,58 @@ export function normalizeCounts(counts) {
 }
 
 /**
+ * Project the storage endpoint. The route wraps the engine's `describe()`
+ * summary as `{ ok: true, mode, storage: { data_dir, state_file, exists,
+ * file_size_bytes, last_saved_at, schema_version, recovery, write_error } }`;
+ * a bare `describe()` shape is accepted too so the card survives Host changes.
+ * The page only needs display-safe facts, so malformed or missing fields become
+ * `null` and never throw.
+ *
+ * @param {unknown} body
+ * @returns {{
+ *   dataDir: string | null,
+ *   stateFile: string | null,
+ *   exists: boolean | null,
+ *   fileSizeBytes: number | null,
+ *   lastSavedAt: string | null,
+ *   schemaVersion: string | null,
+ *   recovery: { kind: string | null, backupPath: string | null, occurredAt: string | null } | null,
+ *   writeError: { code: string | null, message: string | null, at: string | null } | null,
+ * } | null}
+ */
+export function normalizeStoragePayload(body) {
+  if (!isObject(body)) return null
+  const source = isObject(body.storage) ? body.storage : body
+  return {
+    dataDir: isNonEmptyString(source.data_dir) ? source.data_dir : null,
+    stateFile: isNonEmptyString(source.state_file) ? source.state_file : null,
+    exists: typeof source.exists === 'boolean' ? source.exists : null,
+    fileSizeBytes: typeof source.file_size_bytes === 'number' && Number.isFinite(source.file_size_bytes) && source.file_size_bytes >= 0
+      ? source.file_size_bytes
+      : null,
+    lastSavedAt: isNonEmptyString(source.last_saved_at) ? source.last_saved_at : null,
+    schemaVersion: isNonEmptyString(source.schema_version) ? source.schema_version : null,
+    recovery: normalizeRecovery(source.recovery),
+    writeError: normalizeWriteError(source.write_error)
+  }
+}
+
+/**
+ * Human-readable size for the state-file card; binary units keep the copy
+ * compact for small files and readable for large ones.
+ *
+ * @param {unknown} bytes
+ * @returns {string | null}
+ */
+export function formatByteSize(bytes) {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return null
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`
+}
+
+/**
  * Fetch the editable runtime settings.
  *
  * @param {AbortSignal | undefined} signal
@@ -339,6 +433,115 @@ export async function resetEngineData(signal) {
   )
   if (!outcome.data) return outcome
   return { data: { counts: normalizeCounts(outcome.data.counts) } }
+}
+
+/**
+ * Fetch the embedded engine storage card.
+ *
+ * @param {AbortSignal | undefined} signal
+ */
+export async function requestStorage(signal) {
+  const outcome = await requestJson(STORAGE_URL, { method: 'GET' }, signal)
+  if (!outcome.data) return outcome
+  const data = normalizeStoragePayload(outcome.data)
+  return data ? { data } : { error: { kind: 'invalid' } }
+}
+
+/**
+ * Read the filename from a Content-Disposition header.
+ *
+ * @param {string | null | undefined} disposition
+ * @returns {string | null}
+ */
+export function exportFilenameFromDisposition(disposition) {
+  if (typeof disposition !== 'string' || disposition === '') return null
+  const quoted = /filename\s*=\s*"([^"]+)"/i.exec(disposition)
+  if (quoted && quoted[1]) return quoted[1]
+  const bare = /filename\s*=\s*([^\s;]+)/i.exec(disposition)
+  return bare && bare[1] ? bare[1] : null
+}
+
+/**
+ * Fallback download name when the Host omits Content-Disposition.
+ *
+ * Mirrors the Host filename shape `trust-platform-state-<YYYYMMDD-HHmmss>.json`
+ * with a UTC timestamp.
+ *
+ * @param {Date} [date] download time.
+ * @returns {string}
+ */
+export function defaultExportFilename(date = new Date()) {
+  const moment = date instanceof Date && Number.isFinite(date.getTime()) ? date : new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  const day = `${moment.getUTCFullYear()}${pad(moment.getUTCMonth() + 1)}${pad(moment.getUTCDate())}`
+  const clock = `${pad(moment.getUTCHours())}${pad(moment.getUTCMinutes())}${pad(moment.getUTCSeconds())}`
+  return `trust-platform-state-${day}-${clock}.json`
+}
+
+/**
+ * Download the engine state snapshot as JSON. The body is validated before it
+ * reaches the browser download so an error page never masquerades as a backup.
+ *
+ * @param {AbortSignal | undefined} signal
+ * @returns {Promise<
+ *   { data: { filename: string, text: string } } |
+ *   { aborted: true } |
+ *   { error: object }
+ * >}
+ */
+export async function requestExport(signal) {
+  if (typeof fetch !== 'function') return { error: { kind: 'unavailable' } }
+
+  let response
+  try {
+    response = await fetch(EXPORT_URL, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { accept: 'application/json' },
+      signal: signal || undefined
+    })
+  } catch (error) {
+    if (error && (error.name === 'AbortError' || error.code === 'ABORT_ERR')) return { aborted: true }
+    return { error: { kind: 'network', message: errorMessage(error) } }
+  }
+
+  if (!isObject(response)) return { error: { kind: 'invalid' } }
+  if (response.status === 401 || response.status === 403) return { error: { kind: 'forbidden' } }
+  if (response.status === 404) return { error: { kind: 'unavailable' } }
+  if (!response.ok) return { error: { kind: 'http', status: response.status } }
+
+  let text = ''
+  try {
+    text = await response.text()
+  } catch {
+    return { error: { kind: 'invalid' } }
+  }
+  if (typeof text !== 'string' || text.trim() === '') return { error: { kind: 'invalid' } }
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { error: { kind: 'invalid' } }
+  }
+  if (!isObject(parsed) || parsed.ok !== true) return { error: { kind: 'invalid' } }
+
+  let size = 0
+  try {
+    size = typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length
+  } catch {
+    size = text.length
+  }
+  if (size > MAX_EXPORT_BYTES) return { error: { kind: 'http', status: 413 } }
+
+  const disposition = response.headers && typeof response.headers.get === 'function'
+    ? response.headers.get('content-disposition')
+    : null
+  return {
+    data: {
+      filename: exportFilenameFromDisposition(disposition) || defaultExportFilename(),
+      text
+    }
+  }
 }
 
 /**

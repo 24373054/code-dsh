@@ -40,8 +40,12 @@ reference.
 The host half registers the identity and payment-governance tools of the embedded engine under the
 same names the plugin has always used (`register_identity`, `get_identity_status`,
 `verify_credential`, `check_authorization`, `create_payment_task`, `get_risk_decision`,
-`verify_operation_event`, `get_execution_receipt`, …). `execute_intervention` appears only when the
-intervention gate is enabled in the settings panel.
+`verify_operation_event`, `get_execution_receipt`, …). The embedded catalog exposes **60 tools** in
+embedded and sandbox mode (**61** when the intervention gate is enabled:
+`execute_intervention` appears only then). Two depth tools are new in 0.7.0:
+`read_delegation_chain` resolves a delegation chain root → leaf and reports its effective limits and
+`chain_trustworthy`; `settle_payment_task` applies a signed `FINAL SETTLE` close-loop
+(`CONFIRMED → AUDITED → CLOSED`) and refuses when verification is not `VALID`. Neither moves funds.
 
 In the conversation, eight governed calls render as compact trust cards: a localized title, a status
 badge, the result's `decision` badge when present, a one-line code/message summary and a raw-JSON
@@ -63,10 +67,13 @@ baseline modules (`react`, `react/jsx-runtime`).
 - **Package badge** showing the active trust-platform package version.
 - **Settings panel** in Settings → Trust Platform: a live status header (mode, data directory,
   health, schema revision, start time) and an editable form for the actor DID, the
-  intervention-execution gate and the policy limits. The page polls `GET /trust-platform/api/settings`
-  and `GET /trust-platform/api/health` every 10 seconds while mounted, keeps unsaved edits on screen
-  across refreshes, and renders the Host's `422` validation message instead of discarding the form.
-  A danger zone resets all trust data behind a two-step confirmation; runtime settings are kept.
+  intervention-execution gate and the policy limits. The page polls `GET /trust-platform/api/settings`,
+  `GET /trust-platform/api/health` and `GET /trust-platform/api/storage` every 10 seconds while
+  mounted, keeps unsaved edits on screen across refreshes, and renders the Host's `422` validation
+  message instead of discarding the form.
+- **Data management** in the same page: a storage card (state file, size, schema revision, last save,
+  recovery and `write_error` states), a JSON download of the full engine state, and a reset of all
+  trust records behind a typed `RESET` confirmation; runtime settings are kept.
 
 ### Settings panel
 
@@ -81,9 +88,12 @@ baseline modules (`react`, `react/jsx-runtime`).
 
 Save sends only changed fields (`PUT /trust-platform/api/settings`); apply defaults fills the form
 from the engine's startup policy; reset deletes engine records (`POST /trust-platform/api/reset`,
-body `{ "confirm": true }`) and keeps the runtime settings. All routes are same-origin, use the GUI
-session and are rendered as localized, retryable states on `403`, `404`, `422`, `500`, invalid JSON
-or network failure. The browser half sends no telemetry and no data leaves the DSH origin.
+body `{ "confirm": true }`) and keeps the runtime settings. The data-management section reads
+`GET /trust-platform/api/storage`, downloads the state JSON from `GET /trust-platform/api/export`
+(8 MiB cap) and enables the reset button only after `RESET` is typed into the confirmation field.
+All routes are same-origin, use the GUI session and are rendered as localized, retryable states on
+`403`, `404`, `413`, `422`, `500`, `503`, invalid JSON or network failure. The browser half sends no
+telemetry and no data leaves the DSH origin.
 
 ### Localized plugin metadata
 
@@ -135,6 +145,30 @@ export of the external-service adapter has been removed.
 - The browser half only knows the fixed same-origin routes; callers cannot request arbitrary URLs.
 - The embedded engine marks its results authoritative; sandbox results are explicitly non-authoritative
   and unknown or unreadable data never yields `ALLOW`.
+
+## Release notes
+
+### 0.7.0
+
+- Tool catalog grows to 60 tools in embedded/sandbox mode (61 with the intervention gate enabled):
+  `read_delegation_chain` resolves a delegation chain root → leaf with effective limits and
+  `chain_trustworthy`, and `settle_payment_task` runs a signed `FINAL SETTLE` close-loop
+  (`CONFIRMED → AUDITED → CLOSED`) that refuses when verification is not `VALID`.
+- Multi-level delegation chains: `check_authorization` follows delegated capabilities across
+  multiple links and fails closed with `DEFER` on a broken, expired or over-scoped link.
+- Signed settlement close-loop: settlement evidence is linked back to tasks, receipts and audit
+  records; the engine still never moves funds.
+- Governance policy and risk-model activation: policy versions and model revisions can be activated
+  at runtime in addition to the editable limits and thresholds.
+- Data management: a storage card, JSON export and a typed-`RESET` reset of all engine records on
+  the settings page.
+- Crash recovery: the embedded engine restores its state file after a restart and reports the
+  recovery result in the data-management card.
+
+### 0.6.0
+
+- The trust plane moved in-process; the external control-plane adapter and its
+  `./control-plane-client` export were removed.
 
 ## Development
 

@@ -127,7 +127,7 @@ test('cross-border payment trust chain runs end to end and fails closed', async 
       allowInterventionExecution: false,
     })
 
-    assert.equal(tools.size, 58, 'default tool surface is 58 tools')
+    assert.equal(tools.size, 60, 'default tool surface is 60 tools')
     assert.equal(tools.has('execute_intervention'), false, 'intervention execution stays gated by default')
     assert.ok(host.get('trustPlane'), 'embedded mode provides trustPlane service')
     assert.equal(browser.registrations.length, 1, 'browser API route is registered once')

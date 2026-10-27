@@ -7,10 +7,15 @@
  * only the changed fields; the host validates the patch and a rejected change
  * renders its message (and details) instead of discarding the form.
  *
- * The page polls the same-origin settings and health routes every ten seconds,
- * keeps the last good snapshot across failed refreshes, and leaves a dirty
- * draft untouched while the operator edits. Destructive data reset needs an
- * explicit second click. All visible copy comes from the locale dictionaries.
+ * Below the form, a data-management block shows the state-file storage card,
+ * exports the engine state as a JSON download and resets every engine record
+ * behind a typed`RESET` confirmation. Every action renders localized loading,
+ * success and error states.
+ *
+ * The page polls the same-origin settings, health and storage routes every ten
+ * seconds, keeps the last good snapshot across failed refreshes, and leaves a
+ * dirty draft untouched while the operator edits. All visible copy comes from
+ * the locale dictionaries.
  */
 import { useEffect, useState } from 'react'
 import { Badge } from './badge.jsx'
@@ -22,6 +27,8 @@ import {
   buildSettingsPatch,
   createDraft,
   describeDetails,
+  formatByteSize,
+  requestExport,
   resetEngineData,
   saveSettings,
   totalCount,
@@ -64,6 +71,37 @@ function actionStyle(base, disabled) {
 }
 
 /**
+ * Trigger a browser download for one exported state snapshot.
+ *
+ * The helper is defensive on purpose: the settings page must keep working when
+ * the browser globals it needs are unavailable (for example in a unit test).
+ *
+ * @param {string} filename suggested download name.
+ * @param {string} text JSON payload.
+ * @returns {boolean} whether a download was started.
+ */
+function saveDownload(filename, text) {
+  try {
+    if (typeof document === 'undefined' || typeof Blob !== 'function') return false
+    const api = typeof URL === 'object' && URL !== null ? URL : null
+    if (!api || typeof api.createObjectURL !== 'function') return false
+    const blob = new Blob([text], { type: 'application/json' })
+    const href = api.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = href
+    anchor.download = filename
+    anchor.rel = 'noopener'
+    if (document.body && typeof document.body.appendChild === 'function') document.body.appendChild(anchor)
+    anchor.click()
+    if (typeof anchor.remove === 'function') anchor.remove()
+    setTimeout(() => api.revokeObjectURL(href), 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * `settings.section` entry: the trust-platform settings page.
  *
  * @param {{
@@ -74,7 +112,7 @@ function actionStyle(base, disabled) {
 export function SettingsPanel(props) {
   const { t } = props || {}
   const [snapshot, reload] = useSettings(POLL_INTERVAL_MS)
-  const { data, health, error, refreshedAt } = snapshot
+  const { data, health, storage, error, storageError, refreshedAt } = snapshot
 
   const server = data ? data.settings : null
   const defaults = data ? data.defaults : null
@@ -83,7 +121,8 @@ export function SettingsPanel(props) {
   const [editor, setEditor] = useState(null)
   const [saving, setSaving] = useState(false)
   const [resetting, setResetting] = useState(false)
-  const [confirmingReset, setConfirmingReset] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [resetConfirm, setResetConfirm] = useState('')
   const [feedback, setFeedback] = useState(null)
   const [actionError, setActionError] = useState(null)
 
@@ -160,19 +199,42 @@ export function SettingsPanel(props) {
   }
 
   const reset = () => {
-    if (saving || resetting) return
+    if (saving || resetting || resetConfirm.trim() !== 'RESET') return
     setResetting(true)
     clearMessages()
     resetEngineData().then((outcome) => {
       setResetting(false)
-      setConfirmingReset(false)
       if (outcome.data) {
         setEditor(null)
+        setResetConfirm('')
         setFeedback({
           tone: 'ok',
           text: translate(t, 'settings.feedback.reset', { count: totalCount(outcome.data.counts) })
         })
         reload()
+      } else if (outcome.error) {
+        setActionError({
+          text: describeError(outcome.error, t, 'settings'),
+          details: describeDetails(outcome.error.details)
+        })
+      }
+    })
+  }
+
+  const exportData = () => {
+    if (exporting) return
+    setExporting(true)
+    clearMessages()
+    requestExport().then((outcome) => {
+      setExporting(false)
+      if (outcome.data) {
+        const downloaded = saveDownload(outcome.data.filename, outcome.data.text)
+        setFeedback({
+          tone: downloaded ? 'ok' : 'info',
+          text: translate(t, downloaded ? 'settings.feedback.exported' : 'settings.error.export', {
+            filename: outcome.data.filename
+          })
+        })
       } else if (outcome.error) {
         setActionError({
           text: describeError(outcome.error, t, 'settings'),
@@ -189,8 +251,11 @@ export function SettingsPanel(props) {
   const authoritative = mode === 'embedded'
   const healthLabel = health && health.status ? health.status : translate(t, 'settings.health.unknown')
   const errorText = error ? describeError(error, t, 'settings') : null
+  const storageErrorText = storageError ? describeError(storageError, t, 'settings') : null
   const refreshedText = refreshedAt ? formatTime(refreshedAt) : null
   const busy = saving || resetting
+  const resetReady = resetConfirm.trim() === 'RESET'
+  const storageState = storage ? 'ready' : storageErrorText ? 'error' : 'loading'
   const stateName = saving
     ? 'saving'
     : resetting
@@ -399,66 +464,151 @@ export function SettingsPanel(props) {
               </div>
             </div>
           ) : null}
+        </>
+      ) : null}
 
-          <div style={styles.subTitle}>{translate(t, 'settings.reset.title')}</div>
-          <div style={styles.note}>{translate(t, 'settings.reset.description')}</div>
-          <div style={styles.formActions}>
-            <button
-              type="button"
-              onClick={() => setConfirmingReset(true)}
-              disabled={busy || confirmingReset}
-              data-trust-action="reset-data"
-              style={actionStyle(styles.dangerButton, busy || confirmingReset)}
-            >
-              {translate(t, resetting ? 'settings.action.resetting' : 'settings.action.reset')}
+      <div style={styles.subTitle}>{translate(t, 'settings.storage.title')}</div>
+      <div style={styles.note}>{translate(t, 'settings.storage.description')}</div>
+      <div style={styles.formActions}>
+        <button
+          type="button"
+          onClick={reload}
+          disabled={busy || snapshot.loading}
+          data-trust-action="refresh-storage"
+          style={actionStyle(styles.actionButton, busy || snapshot.loading)}
+        >
+          {translate(t, 'settings.storage.refresh')}
+        </button>
+        <button
+          type="button"
+          onClick={exportData}
+          disabled={exporting || busy}
+          data-trust-action="export-data"
+          style={actionStyle(styles.actionButton, exporting || busy)}
+        >
+          {translate(t, exporting ? 'settings.action.exporting' : 'settings.action.export')}
+        </button>
+      </div>
+
+      <div
+        style={styles.storageCard}
+        data-trust-storage="card"
+        data-trust-storage-state={storageState}
+      >
+        {storageState === 'error' ? (
+          <div style={styles.errorBox}>
+            <span>{storageErrorText}</span>
+            <button type="button" onClick={reload} disabled={busy} style={actionStyle(styles.actionButton, busy)}>
+              {translate(t, 'settings.retry')}
             </button>
           </div>
-
-          {confirmingReset ? (
-            <div style={styles.confirmBox} data-trust-confirm="reset">
-              <div>{translate(t, 'settings.reset.confirm')}</div>
-              <span style={styles.actions}>
-                <button
-                  type="button"
-                  onClick={reset}
-                  disabled={resetting}
-                  data-trust-confirm-reset=""
-                  style={actionStyle(styles.dangerButton, resetting)}
-                >
-                  {translate(t, resetting ? 'settings.action.resetting' : 'settings.action.confirmReset')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmingReset(false)}
-                  disabled={resetting}
-                  data-trust-action="cancel-reset"
-                  style={actionStyle(styles.actionButton, resetting)}
-                >
-                  {translate(t, 'settings.action.cancelReset')}
-                </button>
+        ) : storage ? (
+          <>
+            <div style={styles.storageRow}>
+              <span style={styles.storageLabel}>{translate(t, 'settings.storage.dataDir')}</span>
+              <span style={styles.mono}>{storage.dataDir || '—'}</span>
+            </div>
+            <div style={styles.storageRow}>
+              <span style={styles.storageLabel}>{translate(t, 'settings.storage.stateFile')}</span>
+              <span style={styles.mono}>{storage.stateFile || '—'}</span>
+            </div>
+            <div style={styles.storageRow}>
+              <span style={styles.storageLabel}>{translate(t, 'settings.storage.fileSize')}</span>
+              <span>{formatByteSize(storage.fileSizeBytes) || '—'}</span>
+            </div>
+            <div style={styles.storageRow}>
+              <span style={styles.storageLabel}>{translate(t, 'settings.storage.exists')}</span>
+              <span>{translate(t, storage.exists === false ? 'settings.storage.missing' : 'settings.storage.exists')}</span>
+            </div>
+            {storage.lastSavedAt ? (
+              <div style={styles.storageRow}>
+                <span style={styles.storageLabel}>{translate(t, 'settings.storage.lastSavedAt')}</span>
+                <span>{formatTime(storage.lastSavedAt) || storage.lastSavedAt}</span>
+              </div>
+            ) : null}
+            {storage.schemaVersion ? (
+              <div style={styles.storageRow}>
+                <span style={styles.storageLabel}>{translate(t, 'settings.storage.schemaVersion')}</span>
+                <span style={styles.mono}>{storage.schemaVersion}</span>
+              </div>
+            ) : null}
+            <div style={styles.storageRow}>
+              <span style={styles.storageLabel}>{translate(t, 'settings.storage.recovery')}</span>
+              <span>
+                {storage.recovery
+                  ? [
+                      storage.recovery.kind || translate(t, 'settings.storage.recoveryDetected'),
+                      storage.recovery.occurredAt
+                        ? formatTime(storage.recovery.occurredAt) || storage.recovery.occurredAt
+                        : null
+                    ].filter(Boolean).join(' · ')
+                  : translate(t, 'settings.storage.recoveryClean')}
               </span>
             </div>
-          ) : null}
+            {storage.recovery && storage.recovery.backupPath ? (
+              <div style={styles.storageRow}>
+                <span style={styles.storageLabel}>{translate(t, 'settings.storage.backupPath')}</span>
+                <span style={styles.mono}>{storage.recovery.backupPath}</span>
+              </div>
+            ) : null}
+            {storage.writeError ? (
+              <div style={styles.confirmBox} data-trust-storage-warning="write_error">
+                {translate(t, 'settings.storage.writeError', {
+                  message: storage.writeError.message || storage.writeError.code || ''
+                })}
+                {storage.writeError.at
+                  ? ` · ${formatTime(storage.writeError.at) || storage.writeError.at}`
+                  : ''}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div style={styles.muted}>{translate(t, 'settings.storage.loading')}</div>
+        )}
+      </div>
 
-          {feedback ? (
-            <div
-              style={feedback.tone === 'ok' ? styles.feedbackOk : styles.note}
-              data-trust-feedback={feedback.tone}
-            >
-              {feedback.text}
-            </div>
+      <div style={styles.subTitle}>{translate(t, 'settings.reset.title')}</div>
+      <div style={styles.note}>{translate(t, 'settings.reset.description')}</div>
+      <div style={styles.formActions} data-trust-confirm="reset">
+        <input
+          type="text"
+          value={resetConfirm}
+          placeholder="RESET"
+          aria-label={translate(t, 'settings.reset.confirmInput')}
+          disabled={busy}
+          onChange={(event) => setResetConfirm(event.target.value)}
+          data-trust-reset-input="confirm"
+          style={controlStyle(styles.input, busy)}
+        />
+        <span style={styles.hint}>{translate(t, 'settings.reset.confirmInput')}</span>
+        <button
+          type="button"
+          onClick={reset}
+          disabled={busy || !resetReady}
+          data-trust-action="reset"
+          style={actionStyle(styles.dangerButton, busy || !resetReady)}
+        >
+          {translate(t, resetting ? 'settings.action.resetting' : 'settings.action.reset')}
+        </button>
+      </div>
+
+      {feedback ? (
+        <div
+          style={feedback.tone === 'ok' ? styles.feedbackOk : styles.note}
+          data-trust-feedback={feedback.tone}
+        >
+          {feedback.text}
+        </div>
+      ) : null}
+      {actionError ? (
+        <div style={styles.errorBox} data-trust-feedback="error">
+          <span>{actionError.text}</span>
+          {actionError.details ? (
+            <span style={styles.mono}>
+              {translate(t, 'settings.error.details', { details: actionError.details })}
+            </span>
           ) : null}
-          {actionError ? (
-            <div style={styles.errorBox} data-trust-feedback="error">
-              <span>{actionError.text}</span>
-              {actionError.details ? (
-                <span style={styles.mono}>
-                  {translate(t, 'settings.error.details', { details: actionError.details })}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-        </>
+        </div>
       ) : null}
     </section>
   )

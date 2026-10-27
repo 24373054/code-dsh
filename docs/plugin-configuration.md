@@ -14,7 +14,7 @@ The engine keeps its records in a profile-owned data directory and runs determin
 | --- | --- | --- |
 | Store | JSON file under `$DSH_HOME/plugin-data/dsh-trust-platform/state.json` | Process memory only |
 | Persistence | Survives plugin reloads, profile restarts and `dsh` upgrades | Lost when the plugin reloads |
-| Tools | 58 tools (59 with the intervention gate) | Same 58/59 tools, same names |
+| Tools | 60 tools (61 with the intervention gate) | Same 60/61 tools, same names |
 | Authoritative | Yes (`source: "embedded-engine"`, `authoritative: true`) | No (`source: "in-memory-sandbox"`, `authoritative: false`) |
 | Typical use | Real workflows, settings panel, demos with durable state | Offline tests, throwaway experiments |
 

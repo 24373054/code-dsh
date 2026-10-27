@@ -364,6 +364,34 @@ export const note = {
   lineHeight: 1.5
 }
 
+/** Data-management card: storage facts above the export/reset actions. */
+export const storageCard = {
+  marginTop: '8px',
+  padding: '10px 12px',
+  borderRadius: '8px',
+  border: '1px solid var(--dsw-color-border, rgba(127, 127, 127, 0.3))',
+  background: 'var(--dsw-color-surface-subtle, rgba(127, 127, 127, 0.06))',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '6px'
+}
+
+/** One label/value line inside the storage card. */
+export const storageRow = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: '8px',
+  flexWrap: 'wrap',
+  fontSize: '12px'
+}
+
+/** Fixed label column inside the storage card. */
+export const storageLabel = {
+  flex: '0 0 180px',
+  color: MUTED,
+  fontSize: '11px'
+}
+
 /** Shared shape of a status/decision pill; tone styles only recolour it. */
 export const pill = {
   display: 'inline-flex',

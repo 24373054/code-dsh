@@ -33,13 +33,19 @@ import {
   POLICY_NUMBER_FIELDS,
   buildSettingsPatch,
   createDraft,
+  defaultExportFilename,
   describeDetails,
+  exportFilenameFromDisposition,
+  formatByteSize,
   isDraftDirty,
   normalizeCounts,
   normalizeHealthPayload,
   normalizeSettingsPayload,
+  normalizeStoragePayload,
+  requestExport,
   requestHealth,
   requestSettings,
+  requestStorage,
   resetEngineData,
   saveSettings,
   totalCount,
@@ -375,7 +381,27 @@ test('locales cover the tool titles and settings vocabulary', () => {
     'settings.error.ratio',
     'settings.error.thresholds',
     'settings.error.validation',
-    'settings.error.stale'
+    'settings.error.stale',
+    'settings.storage.title',
+    'settings.storage.description',
+    'settings.storage.dataDir',
+    'settings.storage.stateFile',
+    'settings.storage.fileSize',
+    'settings.storage.exists',
+    'settings.storage.lastSavedAt',
+    'settings.storage.schemaVersion',
+    'settings.storage.recovery',
+    'settings.storage.recoveryClean',
+    'settings.storage.recoveryDetected',
+    'settings.storage.backupPath',
+    'settings.storage.writeError',
+    'settings.storage.loading',
+    'settings.storage.refresh',
+    'settings.action.export',
+    'settings.action.exporting',
+    'settings.reset.confirmInput',
+    'settings.feedback.exported',
+    'settings.error.export'
   ]) {
     assert.ok(hasCopy(key), `missing English copy for ${key}`)
   }
@@ -485,6 +511,156 @@ test('settings payload normalizers tolerate partial host data', () => {
     events: null,
     receipts: null
   })
+})
+
+test('storage normalizers and export helpers are display-safe', () => {
+  const normalized = normalizeStoragePayload({
+    ok: true,
+    mode: 'embedded',
+    storage: {
+      data_dir: 'C:/trust-data',
+      state_file: 'C:/trust-data/state.json',
+      exists: true,
+      file_size_bytes: 2048,
+      last_saved_at: '2026-10-27T00:00:00.000Z',
+      schema_version: 'embedded-1',
+      recovery: {
+        kind: 'restored',
+        backupPath: 'C:/trust-data/state.json.bak',
+        occurred_at: '2026-10-27T00:00:01.000Z'
+      },
+      write_error: { code: 'ENOSPC', message: 'disk full', at: '2026-10-27T00:00:02.000Z' }
+    }
+  })
+  assert.equal(normalized.dataDir, 'C:/trust-data')
+  assert.equal(normalized.stateFile, 'C:/trust-data/state.json')
+  assert.equal(normalized.exists, true)
+  assert.equal(normalized.fileSizeBytes, 2048)
+  assert.equal(normalized.recovery.kind, 'restored')
+  assert.equal(normalized.recovery.backupPath, 'C:/trust-data/state.json.bak')
+  assert.equal(normalized.recovery.occurredAt, '2026-10-27T00:00:01.000Z')
+  assert.equal(normalized.writeError.code, 'ENOSPC')
+  assert.equal(normalized.writeError.message, 'disk full')
+  assert.equal(normalized.writeError.at, '2026-10-27T00:00:02.000Z')
+  assert.equal(normalizeStoragePayload(null), null)
+  assert.equal(normalizeStoragePayload('state'), null)
+  assert.equal(normalizeStoragePayload({ file_size_bytes: -1, data_dir: 7 }).fileSizeBytes, null)
+  assert.equal(normalizeStoragePayload({}).exists, null)
+  assert.equal(normalizeStoragePayload({ storage: { recovery: null, write_error: null } }).recovery, null)
+  assert.equal(normalizeStoragePayload({ data_dir: 'flat-shape' }).dataDir, 'flat-shape')
+
+  assert.equal(formatByteSize(512), '512 B')
+  assert.equal(formatByteSize(2048), '2.0 KiB')
+  assert.equal(formatByteSize(1024 * 1024), '1.0 MiB')
+  assert.equal(formatByteSize(1024 * 1024 * 1024), '1.00 GiB')
+  assert.equal(formatByteSize(-1), null)
+  assert.equal(formatByteSize('nope'), null)
+
+  assert.equal(
+    exportFilenameFromDisposition('attachment; filename="trust-platform-state-20261027-000000.json"'),
+    'trust-platform-state-20261027-000000.json'
+  )
+  assert.equal(exportFilenameFromDisposition('attachment; filename=state.json'), 'state.json')
+  assert.equal(exportFilenameFromDisposition('attachment'), null)
+  assert.equal(exportFilenameFromDisposition(null), null)
+  assert.equal(
+    defaultExportFilename(new Date('2026-10-27T00:00:00.000Z')),
+    'trust-platform-state-20261027-000000.json'
+  )
+})
+
+test('storage and export transports map every outcome onto typed errors', async () => {
+  const calls = []
+  const storageOutcome = await withFakeFetch(async (url, init) => {
+    calls.push({ url, init })
+    return jsonResponse(200, {
+      ok: true,
+      mode: 'embedded',
+      storage: {
+        data_dir: 'C:/trust-data',
+        state_file: 'state.json',
+        exists: false,
+        file_size_bytes: 0,
+        schema_version: 'embedded-1'
+      }
+    })
+  }, () => requestStorage())
+  assert.equal(calls[0].url, '/trust-platform/api/storage')
+  assert.equal(calls[0].init.method, 'GET')
+  assert.equal(calls[0].init.credentials, 'same-origin')
+  assert.equal(storageOutcome.data.dataDir, 'C:/trust-data')
+  assert.equal(storageOutcome.data.exists, false)
+
+  const missingStorage = await withFakeFetch(async () => jsonResponse(503, {}), () => requestStorage())
+  assert.equal(missingStorage.error.kind, 'http')
+  assert.equal(missingStorage.error.status, 503)
+
+  const exportCalls = []
+  const exportOutcome = await withFakeFetch(async (url, init) => {
+    exportCalls.push({ url, init })
+    return {
+      status: 200,
+      ok: true,
+      headers: {
+        get(name) {
+          return name === 'content-disposition'
+            ? 'attachment; filename="trust-platform-state-2026-10-27.json"'
+            : null
+        }
+      },
+      text: async () => JSON.stringify({
+        ok: true,
+        exported_at: '2026-10-27T00:00:00.000Z',
+        version: 1,
+        schema_version: 'embedded-1',
+        state: { identities: [] }
+      })
+    }
+  }, () => requestExport())
+  assert.equal(exportCalls[0].url, '/trust-platform/api/export')
+  assert.equal(exportCalls[0].init.method, 'GET')
+  assert.equal(exportCalls[0].init.credentials, 'same-origin')
+  assert.equal(exportOutcome.data.filename, 'trust-platform-state-2026-10-27.json')
+  assert.match(exportOutcome.data.text, /"version":1/)
+  assert.match(exportOutcome.data.text, /"ok":true/)
+
+  const unavailableExport = await withFakeFetch(async () => jsonResponse(404, {}), () => requestExport())
+  assert.equal(unavailableExport.error.kind, 'unavailable')
+  const cappedExport = await withFakeFetch(async () => jsonResponse(413, {}), () => requestExport())
+  assert.equal(cappedExport.error.kind, 'http')
+  assert.equal(cappedExport.error.status, 413)
+  const malformedExport = await withFakeFetch(async () => ({
+    status: 200,
+    ok: true,
+    headers: { get: () => null },
+    text: async () => '<html>not json</html>'
+  }), () => requestExport())
+  assert.equal(malformedExport.error.kind, 'invalid')
+  const unwrappedExport = await withFakeFetch(async () => ({
+    status: 200,
+    ok: true,
+    headers: { get: () => null },
+    text: async () => JSON.stringify({ version: 1, state: {} })
+  }), () => requestExport())
+  assert.equal(unwrappedExport.error.kind, 'invalid')
+  const emptyExport = await withFakeFetch(async () => ({
+    status: 200,
+    ok: true,
+    headers: { get: () => null },
+    text: async () => ''
+  }), () => requestExport())
+  assert.equal(emptyExport.error.kind, 'invalid')
+
+  const original = globalThis.fetch
+  globalThis.fetch = undefined
+  try {
+    const noFetchStorage = await requestStorage()
+    assert.equal(noFetchStorage.error.kind, 'unavailable')
+    const noFetchExport = await requestExport()
+    assert.equal(noFetchExport.error.kind, 'unavailable')
+  } finally {
+    globalThis.fetch = original
+  }
 })
 
 test('settings draft builds a minimal patch and validates engine ranges', () => {
@@ -656,14 +832,23 @@ test('the settings page exposes screenshot-safe data markers', () => {
     'data-trust-action="save"',
     'data-trust-action="cancel"',
     'data-trust-action="apply-defaults"',
-    'data-trust-action="reset-data"',
-    'data-trust-action="cancel-reset"',
+    'data-trust-action="refresh-storage"',
+    'data-trust-action="export-data"',
+    'data-trust-action="reset"',
+    'data-trust-storage="card"',
     'data-trust-confirm="reset"',
-    'data-trust-confirm-reset=""',
+    'data-trust-reset-input="confirm"',
     'data-trust-feedback='
   ]) {
     assert.ok(source.includes(marker), `missing settings marker: ${marker}`)
   }
+
+  // The data-management card renders before the first storage refresh resolves,
+  // so Playwright can wait on a stable loading marker.
+  const storageCard = nodes.find((node) => node.props && node.props['data-trust-storage'] === 'card')
+  assert.ok(storageCard, 'the storage card must render while the page loads')
+  assert.equal(storageCard.props['data-trust-storage-state'], 'loading')
+  assert.ok(source.includes('data-trust-storage-state={storageState}'), 'the card must publish its state')
 })
 
 test('the package ships localized plugin metadata', () => {
@@ -697,6 +882,12 @@ test('docs describe the embedded engine and start with a preview', () => {
   assert.ok(chineseFirstLine.startsWith('!['), 'DETAIL.zh.md must start with the preview image')
   assert.ok(chineseFirstLine.includes('preview.zh.svg'), 'DETAIL.zh.md preview must reference preview.zh.svg')
   assert.match(chineseDetail, /[\u4e00-\u9fff]/, 'DETAIL.zh.md must be written in Chinese')
+  assert.match(readme, /## Release notes/, 'the README must carry a release-note section')
+  assert.match(readme, /0\.7\.0/, 'the README must announce 0.7.0')
+  assert.match(englishDetail, /0\.7\.0/, 'DETAIL.md must describe the 0.7.0 changes')
+  assert.match(chineseDetail, /0\.7\.0/, 'DETAIL.zh.md must describe the 0.7.0 changes')
+  assert.match(englishDetail, /Data management/i, 'DETAIL.md must document data management')
+  assert.match(chineseDetail, /数据管理/, 'DETAIL.zh.md must document data management')
 })
 
 test('matchesPlugin recognizes every plugin-manager subject shape', () => {

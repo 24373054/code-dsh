@@ -84,14 +84,14 @@ test('Config fills embedded defaults and validates values', () => {
 test('sandbox mode registers the full tool surface and gates execution', async () => {
   const sandbox = createContext()
   apply(sandbox, Config({ mode: 'sandbox' }))
-  assert.equal(sandbox.registeredTools.size, 58)
+  assert.equal(sandbox.registeredTools.size, 60)
   assert.equal(sandbox.registeredTools.has('execute_intervention'), false)
   assert.equal(sandbox.services.has('trustPlane'), true)
   assert.equal(sandbox.services.has('trustPlatformClient'), false)
 
   const gated = createContext()
   apply(gated, Config({ mode: 'sandbox', allowInterventionExecution: true }))
-  assert.equal(gated.registeredTools.size, 59)
+  assert.equal(gated.registeredTools.size, 61)
   assert.equal(gated.registeredTools.has('execute_intervention'), true)
 
   for (const toolName of FORBIDDEN_TOOL_NAMES) {
@@ -104,7 +104,7 @@ test('embedded mode registers the same tool surface and never needs a client', (
   const dataDir = join(tmpdir(), 'trust-platform-never-written')
   const ctx = createContext()
   apply(ctx, Config({ mode: 'embedded', dataDir }))
-  assert.equal(ctx.registeredTools.size, 58)
+  assert.equal(ctx.registeredTools.size, 60)
   assert.equal(ctx.services.has('trustPlatformClient'), false)
   assert.equal(ctx.registeredTools.get('check_service_health').description.includes('embedded'), true)
 })

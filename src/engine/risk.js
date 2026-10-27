@@ -59,6 +59,54 @@ function failValidation(message) {
   fail('VALIDATION_ERROR', message, { status: 422 })
 }
 
+/** Normalize a published policy package's risk thresholds, or null. */
+function normalizeThresholds(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const block = toNumber(value.block ?? value.riskBlockThreshold ?? value.blockThreshold)
+  const defer = toNumber(value.defer ?? value.riskDeferThreshold ?? value.deferThreshold)
+  const throttle = toNumber(value.throttle ?? value.riskThrottleThreshold ?? value.throttleThreshold)
+  if (block === null || defer === null || throttle === null) return null
+  for (const value_ of [block, defer, throttle]) {
+    if (value_ < 0 || value_ > 1) return null
+  }
+  if (!(block >= defer && defer >= throttle)) return null
+  return { block, defer, throttle }
+}
+
+/**
+ * Resolve a policy version from published governance records.
+ *
+ * Only packages that carry ordered risk thresholds resolve. An unknown or
+ * invalid package must never be treated as the default policy, because that
+ * would let governance changes silently widen risk decisions.
+ */
+function publishedPolicyVersion(engine, policyVersion) {
+  const matches = valuesOf(engine.state.policies).filter((record) => {
+    const id = String(record.id || '')
+    const policyPackage = record.package && typeof record.package === 'object' ? record.package : {}
+    if (id.endsWith(`:${policyVersion}`)) return true
+    return String(policyPackage.policy_version ?? policyPackage.policyVersion ?? policyPackage.version ?? '') === String(policyVersion)
+  })
+  if (matches.length === 0) return null
+  matches.sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')))
+  const record = matches[0]
+  const policyPackage = record.package && typeof record.package === 'object' ? record.package : {}
+  const thresholds = normalizeThresholds(policyPackage.risk_thresholds ?? policyPackage.riskThresholds ?? policyPackage.thresholds)
+  if (!thresholds) return null
+  return { record, thresholds }
+}
+
+/** Resolve a model version from published governance records, or null. */
+function publishedModelVersion(engine, modelVersion) {
+  const match = valuesOf(engine.state.models).find((record) => {
+    if (String(record.id || '') === String(modelVersion)) return true
+    if (String(record.model_name || '') === String(modelVersion)) return true
+    const metrics = record.metrics && typeof record.metrics === 'object' ? record.metrics : {}
+    return String(metrics.model_version ?? metrics.modelVersion ?? '') === String(modelVersion)
+  })
+  return match ?? null
+}
+
 function toNumber(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null
   if (typeof value === 'string' && value.trim() !== '') {
@@ -190,6 +238,39 @@ export function createRiskEngine(engine) {
       if (verification) verificationStatus = String(verification.overall_status || '').toUpperCase()
     }
 
+    // Governance binding: a non-default policy version must resolve to a
+    // published policy package that carries ordered thresholds, and a
+    // non-default model version must resolve to a published model record.
+    // Unknown versions are NOT_EVALUABLE and always defer, never allow.
+    let thresholds = {
+      block: engine.policy.riskBlockThreshold,
+      defer: engine.policy.riskDeferThreshold,
+      throttle: engine.policy.riskThrottleThreshold,
+    }
+    let policySource = { policy_version: engine.policy.policyVersion, source: 'embedded-default' }
+    let policyResolved = true
+    if (String(body.policy_version) !== String(engine.policy.policyVersion)) {
+      const published = publishedPolicyVersion(engine, body.policy_version)
+      if (published) {
+        thresholds = published.thresholds
+        policySource = { policy_version: body.policy_version, source: 'published', policy_id: published.record.id }
+      } else {
+        policyResolved = false
+        policySource = { policy_version: body.policy_version, source: 'unpublished' }
+      }
+    }
+    let modelSource = { model_version: DEFAULT_MODEL_VERSION, source: 'embedded-default' }
+    let modelResolved = true
+    if (String(body.model_version) !== DEFAULT_MODEL_VERSION) {
+      const published = publishedModelVersion(engine, body.model_version)
+      if (published) {
+        modelSource = { model_version: body.model_version, source: 'published', model_id: published.id }
+      } else {
+        modelResolved = false
+        modelSource = { model_version: body.model_version, source: 'unpublished' }
+      }
+    }
+
     // Weighted feature model: booleans become 0/1, finite numbers are clamped
     // to [0, 1]; unknown features are not part of the score.
     const factors = {}
@@ -219,18 +300,22 @@ export function createRiskEngine(engine) {
       .filter((key) => typeof factors[key] === 'number' && factors[key] >= 0.6)
       .map((key) => RISK_FEATURE_LABELS[key])
     if (reasons.length === 0) reasons.push(evaluationStatus === 'VALID' ? '未发现超过当前策略阈值的风险特征' : '缺少可比较的风险特征')
+    if (!policyResolved || !modelResolved) {
+      evaluationStatus = 'NOT_EVALUABLE'
+      if (!policyResolved) reasons.push(`策略版本未发布：${body.policy_version}`)
+      if (!modelResolved) reasons.push(`模型版本未发布：${body.model_version}`)
+    }
 
-    const policy = engine.policy
     let decision
     if (hardInvalid) {
       decision = 'BLOCK'
-    } else if (evaluationStatus === 'NOT_EVALUABLE' || evaluationStatus === 'UNKNOWN') {
+    } else if (!policyResolved || !modelResolved || evaluationStatus === 'NOT_EVALUABLE' || evaluationStatus === 'UNKNOWN') {
       decision = 'DEFER'
-    } else if (score >= policy.riskBlockThreshold) {
+    } else if (score >= thresholds.block) {
       decision = 'BLOCK'
-    } else if (score >= policy.riskDeferThreshold) {
+    } else if (score >= thresholds.defer) {
       decision = 'DEFER'
-    } else if (score >= policy.riskThrottleThreshold) {
+    } else if (score >= thresholds.throttle) {
       decision = 'THROTTLE'
     } else {
       decision = 'ALLOW'
@@ -239,11 +324,9 @@ export function createRiskEngine(engine) {
       verification_status: verificationStatus,
       factors,
       weights: RISK_WEIGHTS,
-      thresholds: {
-        block: policy.riskBlockThreshold,
-        defer: policy.riskDeferThreshold,
-        throttle: policy.riskThrottleThreshold,
-      },
+      thresholds,
+      policy: policySource,
+      model: modelSource,
       decision,
     }
     const stored = storedFeatures(body.features, evaluationStatus, decision)

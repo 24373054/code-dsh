@@ -17,7 +17,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { createRequire } from 'node:module'
 
 import { createTrustPlane } from './engine/index.js'
-import { DEFAULT_POLICY, FileStore, MemoryStore, defaultDataDir } from './engine/core.js'
+import { DEFAULT_POLICY, FileStore, MemoryStore, defaultDataDir, nowIso } from './engine/core.js'
 import { createEngineTools } from './engine-tools.js'
 import { buildOverview } from './state.js'
 import { TRUST_PLANE_SERVICE } from './toolkit.js'
@@ -138,6 +138,15 @@ export function apply(ctx, config) {
     }),
     updateSettings: (patch) => plane.updateSettings(patch),
     reset: () => plane.reset(),
+    // Local data management for the settings page: describe where records live
+    // and export a portable JSON snapshot (same content as the state file).
+    storageInfo: () => store.describe(),
+    exportState: () => ({
+      exported_at: nowIso(),
+      version: PLUGIN_VERSION,
+      schema_version: plane.engine.state.schema_version,
+      state: plane.engine.state,
+    }),
   })
 }
 

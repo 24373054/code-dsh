@@ -91,6 +91,36 @@ export function amountString(value) {
   return (number === null ? 0 : number).toFixed(8)
 }
 
+/**
+ * Find a verified FINAL settlement proof for one task.
+ *
+ * CLOSED is a claim that value has moved, so closing is guarded: a FINAL SETTLE
+ * event must exist and its verification must have reached VALID. Missing
+ * events, unverified events and UNKNOWN/INVALID verifications all fail closed.
+ */
+function settlementProof(engine, taskId) {
+  const events = valuesOf(engine.state.events).filter((event) => {
+    return (
+      String(event.task_id) === String(taskId) &&
+      String(event.event_type || '').toUpperCase() === 'SETTLE' &&
+      String(event.finality || '').toUpperCase() === 'FINAL'
+    )
+  })
+  const verifications =
+    engine.state.verifications && typeof engine.state.verifications === 'object' ? engine.state.verifications : {}
+  for (const event of events) {
+    const verification = verifications[event.id]
+    if (verification && String(verification.overall_status || '').toUpperCase() === 'VALID') {
+      return {
+        event_id: event.id,
+        ledger_status: verification.ledger_status,
+        verified_at: verification.updated_at ?? verification.created_at ?? null,
+      }
+    }
+  }
+  return null
+}
+
 function clampLimit(value, fallback) {
   const number = Number(value)
   if (!Number.isFinite(number)) return fallback
@@ -297,6 +327,12 @@ export function createTaskEngine(engine) {
       const allowed = TASK_TRANSITIONS[fromStatus] || []
       if (body.status !== fromStatus && !allowed.includes(body.status)) {
         fail('INVALID_TASK_TRANSITION', `任务不能从 ${fromStatus} 转为 ${body.status}`, { status: 409 })
+      }
+      if (body.status === 'CLOSED' && fromStatus !== 'CLOSED') {
+        const proof = settlementProof(engine, current.id)
+        if (!proof) {
+          fail('SETTLEMENT_NOT_PROVEN', '任务只有在已签名的 FINAL 结算事件通过校验后才能关闭', { status: 409 })
+        }
       }
       current.status = body.status
       current.updated_at = engine.iso()

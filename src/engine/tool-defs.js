@@ -1039,5 +1039,65 @@ export const TOOL_DEFS = [
     "name": "read_metrics",
     "description": "Read Prometheus-style metrics emitted by the embedded trust engine as text. Read-only diagnostic; the text may be truncated.",
     "parameters": {}
+  },
+  {
+    "name": "read_delegation_chain",
+    "description": "Read a delegation together with its full parent chain and effective scopes. The chain is returned root to leaf, effective limits are the intersection of the whole chain, and chain_trustworthy is false when a link is revoked, the chain is cyclic or the root issuer is not the task requester.",
+    "parameters": {
+      "delegation_id": {
+        "type": "string",
+        "description": "Delegation identifier, e.g. \"del_...\"."
+      },
+      "actor_did": {
+        "type": "string",
+        "description": "Optional DID performing the read; it must be allowed to access the task domain."
+      }
+    }
+  },
+  {
+    "name": "settle_payment_task",
+    "description": "Close the settlement loop with cryptographic evidence: signs a FINAL SETTLE event with the requester embedded Ed25519 key, verifies signature, identity, authorization and ledger, and only then advances the task CONFIRMED -> AUDITED -> CLOSED. Unsigned or unverified settlement is refused instead of claimed.",
+    "parameters": {
+      "task_id": {
+        "type": "string",
+        "description": "Payment task identifier in SUBMITTED status."
+      },
+      "amount": {
+        "type": "number",
+        "description": "Settlement amount; defaults to the task amount."
+      },
+      "settlement_ref": {
+        "type": "string",
+        "description": "Optional settlement reference used in the source_ref and payload."
+      },
+      "actor_did": {
+        "type": "string",
+        "description": "Optional settlement actor; defaults to the task requester DID."
+      },
+      "event_id": {
+        "type": "string",
+        "description": "Optional event id (must start with \"evt_\"); generated when omitted."
+      },
+      "event_time": {
+        "type": "string",
+        "description": "Optional ISO-8601 event time with timezone."
+      },
+      "observed_at": {
+        "type": "string",
+        "description": "Optional ISO-8601 observation time with timezone."
+      },
+      "trace_id": {
+        "type": "string",
+        "description": "Optional trace identifier."
+      },
+      "source_ledger": {
+        "type": "json",
+        "description": "Optional ledger evidence object; defaults to the embedded ledger with FINAL finality."
+      },
+      "policy_version": {
+        "type": "string",
+        "description": "Optional policy version recorded on the settlement event."
+      }
+    }
   }
 ]
