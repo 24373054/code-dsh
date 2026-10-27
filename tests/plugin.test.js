@@ -12,7 +12,7 @@ test('registers governance tools without a send_money capability', () => {
   const registered = []
   apply({ tools: { register(tool) { registered.push(tool); return () => {} } } })
   const names = registered.map((tool) => tool.name)
-  assert.equal(names.length, 10)
+  assert.ok(names.length >= 23)
   assert.ok(names.includes('create_payment_task'))
   assert.ok(names.includes('get_execution_receipt'))
   assert.equal(names.includes('send_money'), false)

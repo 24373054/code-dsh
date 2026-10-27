@@ -14,7 +14,9 @@ Enable the package in the DSH profile/package layer. The bundle patch mounts the
 
 The plugin provides `register_identity`, `get_identity_status`, `verify_credential`, `check_authorization`, `create_payment_task`, `submit_operation_event`, `get_risk_decision`, `request_step_up`, `get_execution_receipt`, and `open_trace_case`.
 
-The first release is an in-memory sandbox adapter. It deliberately has no `send_money` tool and cannot settle funds. `create_payment_task` only creates a handoff for an external Execution Gateway. Replace the stores and gateway boundary with the existing control-plane API before production use; connect real DID/VC, OIDC, policy, ledger, evidence, and key-management providers.
+The package also exports `@00ccf/dsh-trust-platform/client`, a fixed-route control-plane adapter covering health/readiness, identity admission, credential verification, task/delegation reads, event ingest/verify, risk evaluation/evidence, intervention decisions, and audit context. It injects `Authorization`, `X-Actor-DID`, `X-Request-ID`, and unique `Idempotency-Key` headers for writes and rejects arbitrary operations. It intentionally excludes intervention execution, payment connectors, DID mutation, credential issuance, policy/model publication, and evidence anchoring.
+
+The first release's default function plugin is an in-memory sandbox adapter. It deliberately has no `send_money` tool and cannot settle funds. `create_payment_task` only creates a handoff for an external Execution Gateway. Use the fixed-route client with the existing control plane before production use; connect real DID/VC, OIDC, policy, ledger, evidence, and key-management providers.
 
 ## Development
 

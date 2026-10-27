@@ -4,7 +4,7 @@
   "description": "Trusted identity and payment-governance tools for multi-agent cross-border payment workflows.",
   "type": "module",
   "main": "src/index.js",
-  "exports": { ".": "./src/index.js", "./cordis.patch.yml": "./cordis.patch.yml", "./package.json": "./package.json" },
+  "exports": { ".": "./src/index.js", "./client": "./src/control-plane-client.js", "./cordis.patch.yml": "./cordis.patch.yml", "./package.json": "./package.json" },
   "files": ["src", "cordis.patch.yml", "README.md", "LICENSE"],
   "engines": { "dsh": ">=0.2.1-rc.3 <0.3.0" },
   "dependencies": { "@deepseek-ai/dsh-tools": "0.2.1-rc.3" },
