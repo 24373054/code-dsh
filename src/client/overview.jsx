@@ -64,7 +64,7 @@ function OverviewBody({ t }) {
       <div style={styles.sectionHead}>
         <span style={styles.sectionTitle}>{translate(t, 'overview.title')}</span>
         {mode && hasCopy(`overview.mode.${mode}`) ? (
-          <Badge tone={mode === 'embedded' || mode === 'control-plane' ? 'ok' : 'info'}>
+          <Badge tone={mode === 'embedded' ? 'ok' : 'info'}>
             {translate(t, `overview.mode.${mode}`)}
           </Badge>
         ) : plugin ? (

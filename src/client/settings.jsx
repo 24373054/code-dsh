@@ -38,7 +38,7 @@ const AMOUNT_FIELDS = new Set(['singleAmountLimit', 'dailyAmountLimit'])
 
 /** Status tone for a mode value reported by the host. */
 function modeTone(mode) {
-  if (mode === 'embedded' || mode === 'control-plane') return 'ok'
+  if (mode === 'embedded') return 'ok'
   if (mode === 'sandbox' || mode === 'in-memory') return 'info'
   return 'neutral'
 }
@@ -186,7 +186,7 @@ export function SettingsPanel(props) {
   const modeLabel = mode && hasCopy(`settings.mode.${mode}`)
     ? translate(t, `settings.mode.${mode}`)
     : translate(t, 'settings.mode.unknown')
-  const authoritative = mode === 'embedded' || mode === 'control-plane'
+  const authoritative = mode === 'embedded'
   const healthLabel = health && health.status ? health.status : translate(t, 'settings.health.unknown')
   const errorText = error ? describeError(error, t, 'settings') : null
   const refreshedText = refreshedAt ? formatTime(refreshedAt) : null
