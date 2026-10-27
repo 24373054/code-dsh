@@ -242,6 +242,20 @@ test('build emits the lazy-CJS handoff envelope', () => {
   assert.equal(bundleText.includes('send_money'), false, 'no payment-sending vocabulary exists in any mode')
 })
 
+test('the bundle keeps a browser-safe URL guard for state export downloads', () => {
+  // Browsers expose `URL` as a constructor (`typeof URL === 'function'`); an
+  // object-only guard silently disabled the JSON export button in 0.7.0.
+  assert.ok(
+    bundleText.includes('typeof URL === "function"'),
+    'export downloads must accept the constructor-shaped URL global'
+  )
+  assert.equal(
+    bundleText.includes('typeof URL === "object" && URL !== null ? URL : null'),
+    false,
+    'the object-only URL guard always fails in browsers and must not come back'
+  )
+})
+
 test('the bundle requests only shell baseline modules', () => {
   const requests = [...bundleText.matchAll(/\brequire\("([^"]+)"\)/g)].map((match) => match[1])
   assert.ok(requests.length > 0, 'the bundle imports the React runtime')

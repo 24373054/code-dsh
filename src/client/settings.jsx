@@ -83,7 +83,10 @@ function actionStyle(base, disabled) {
 function saveDownload(filename, text) {
   try {
     if (typeof document === 'undefined' || typeof Blob !== 'function') return false
-    const api = typeof URL === 'object' && URL !== null ? URL : null
+    // In browsers `URL` is a constructor (`typeof URL === 'function'`), while
+    // test doubles may expose it as an object; both shapes are accepted and the
+    // capability check below is what actually gates the download.
+    const api = URL && (typeof URL === 'function' || typeof URL === 'object') ? URL : null
     if (!api || typeof api.createObjectURL !== 'function') return false
     const blob = new Blob([text], { type: 'application/json' })
     const href = api.createObjectURL(blob)
