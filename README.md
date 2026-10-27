@@ -114,7 +114,10 @@ adapter from Node code now uses the explicit `./control-plane-client` subpath.
 ## Browser UI
 
 Version 0.3.0 added the first browser half, and 0.4.0 completes it with a read-only settings page; the
-package now publishes as `@sealwax/dsh-trust-platform`. The DSH Web GUI loads the bundle lazily. Installation is unchanged: the
+package now publishes as `@sealwax/dsh-trust-platform`. Version 0.5.0 declares the harness packages
+(`@deepseek-ai/dsh-tools`, `@deepseek-ai/schemastery`, `@deepseek-ai/cordis`) as peer dependencies so
+a profile never installs a second copy that shadows the harness services (`0.4.0` is deprecated for
+that reason) and adds 22 full-surface control-plane tools. The DSH Web GUI loads the bundle lazily. Installation is unchanged: the
 package declares `dsh.client` (`platform: web`) and ships the prebuilt bundle at `lib/client.js`, so
 `dsh plugin add` activates it without a build step. The bundle is a lazy CommonJS factory
 (`window.__ModuleLoader__.load`) whose only bare imports are shell baseline modules (`react`,
