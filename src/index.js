@@ -1,0 +1,35 @@
+import { defineTool } from '@deepseek-ai/dsh-tools'
+
+export const name = 'dsh-trust-platform'
+export const inject = ['tools']
+
+const output = { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }] }
+const text = (value) => typeof value === 'string' ? value.trim() : ''
+const id = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
+function result(ok, data, message) {
+  return ok ? { ok: true, ...data } : { ok: false, code: 'TRUST_VALIDATION_FAILED', message, decision: 'DEFER' }
+}
+
+export function apply(ctx) {
+  const identities = new Map()
+  const credentials = new Map()
+  const authorizations = new Map()
+  const tasks = new Map()
+  const events = []
+  const cases = new Map()
+  const receipts = new Map()
+
+  const register = (definition) => ctx.tools.register(defineTool({ ...definition, output }))
+
+  register({ name: 'register_identity', description: 'Register a cross-domain agent identity. This records intent only; it never grants payment authority.', parameters: { did: { type: 'string', required: true }, domain: { type: 'string', required: true }, display_name: { type: 'string' } }, execute(args) { const did = text(args.did); const domain = text(args.domain); if (!did || !domain) return result(false, {}, 'did and domain are required'); const record = { did, domain, display_name: text(args.display_name) || did, status: 'PENDING_VERIFICATION', created_at: new Date().toISOString() }; identities.set(did, record); return result(true, { identity: record }, '') } })
+  register({ name: 'get_identity_status', description: 'Read the current verification status of an agent identity.', parameters: { did: { type: 'string', required: true } }, execute(args) { const identity = identities.get(text(args.did)); return identity ? result(true, { identity }, '') : result(false, {}, 'identity not found') } })
+  register({ name: 'verify_credential', description: 'Verify a credential reference and return an auditable decision. Do not treat model claims as credentials.', parameters: { did: { type: 'string', required: true }, credential_type: { type: 'string', required: true }, credential_ref: { type: 'string', required: true } }, execute(args) { const did = text(args.did); const ref = text(args.credential_ref); if (!identities.has(did)) return result(false, {}, 'identity must be registered first'); const record = { id: id('cred'), did, credential_type: text(args.credential_type), credential_ref: ref, status: ref ? 'VERIFIED' : 'NOT_EVALUABLE', verified_at: new Date().toISOString() }; credentials.set(record.id, record); return result(record.status === 'VERIFIED', { credential: record }, 'credential reference is empty') } })
+  register({ name: 'check_authorization', description: 'Evaluate delegated authority for a payment intent. A model cannot approve its own authority.', parameters: { did: { type: 'string', required: true }, beneficiary: { type: 'string', required: true }, amount: { type: 'number', required: true }, currency: { type: 'string', required: true } }, execute(args) { const amount = Number(args.amount); const allowed = identities.has(text(args.did)) && amount > 0 && amount <= 10000 && text(args.currency).length === 3; const record = { id: id('auth'), did: text(args.did), beneficiary: text(args.beneficiary), amount, currency: text(args.currency).toUpperCase(), decision: allowed ? 'ALLOW' : 'DEFER', policy_version: 'policy-demo-001' }; authorizations.set(record.id, record); return result(allowed, { authorization: record }, 'identity, amount, or currency failed deterministic policy') } })
+  register({ name: 'create_payment_task', description: 'Create a payment task for downstream execution review. This tool never moves funds.', parameters: { authorization_id: { type: 'string', required: true }, purpose: { type: 'string', required: true } }, execute(args) { const authorization = authorizations.get(text(args.authorization_id)); if (!authorization || authorization.decision !== 'ALLOW') return result(false, {}, 'an ALLOW authorization is required'); const task = { id: id('task'), authorization_id: authorization.id, purpose: text(args.purpose), status: 'PENDING_EXECUTION_GATEWAY', created_at: new Date().toISOString() }; tasks.set(task.id, task); return result(true, { task }, '') } })
+  register({ name: 'submit_operation_event', description: 'Append a signed-operation evidence record for replay and traceability.', parameters: { task_id: { type: 'string', required: true }, event_type: { type: 'string', required: true }, event_ref: { type: 'string', required: true } }, execute(args) { const task = tasks.get(text(args.task_id)); if (!task) return result(false, {}, 'task not found'); const event = { id: id('evt'), task_id: task.id, event_type: text(args.event_type), event_ref: text(args.event_ref), observed_at: new Date().toISOString() }; events.push(event); return result(true, { event }, '') } })
+  register({ name: 'get_risk_decision', description: 'Return a deterministic risk decision with evidence references; risk never replaces authorization.', parameters: { task_id: { type: 'string', required: true } }, execute(args) { const task = tasks.get(text(args.task_id)); if (!task) return result(false, {}, 'task not found'); const evidence = events.filter((event) => event.task_id === task.id).map((event) => event.id); return result(true, { decision: { task_id: task.id, decision: evidence.length ? 'REVIEW' : 'DEFER', evidence_refs: evidence, model_version: 'rules-0.1' } }, '') } })
+  register({ name: 'request_step_up', description: 'Request stronger human or credential verification before continuing a sensitive operation.', parameters: { task_id: { type: 'string', required: true }, reason: { type: 'string', required: true } }, execute(args) { const task = tasks.get(text(args.task_id)); if (!task) return result(false, {}, 'task not found'); return result(true, { task_id: task.id, challenge_id: id('stepup'), status: 'REQUIRED', reason: text(args.reason) }, '') } })
+  register({ name: 'get_execution_receipt', description: 'Read the execution gateway receipt. Absence is not proof of settlement.', parameters: { task_id: { type: 'string', required: true } }, execute(args) { const receipt = receipts.get(text(args.task_id)); return receipt ? result(true, { receipt }, '') : result(true, { receipt: null, status: 'NOT_SETTLED' }, '') } })
+  register({ name: 'open_trace_case', description: 'Open a post-operation trace case with evidence references for accountability review.', parameters: { task_id: { type: 'string', required: true }, reason: { type: 'string', required: true } }, execute(args) { const task = tasks.get(text(args.task_id)); if (!task) return result(false, {}, 'task not found'); const record = { id: id('case'), task_id: task.id, reason: text(args.reason), evidence_refs: events.filter((event) => event.task_id === task.id).map((event) => event.id), status: 'OPEN', opened_at: new Date().toISOString() }; cases.set(record.id, record); return result(true, { case: record }, '') } })
+}
