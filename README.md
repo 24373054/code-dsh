@@ -148,6 +148,13 @@ export of the external-service adapter has been removed.
 
 ## Release notes
 
+### 0.7.1
+
+- Fix the settings-page “Export data” button: the download helper only accepted an object-shaped
+  `URL` global, but browsers expose `URL` as a constructor, so the 0.7.0 export always fell into its
+  failure branch. The guard now accepts function and object shapes, and a build assertion keeps the
+  constructor-safe guard from regressing.
+
 ### 0.7.0
 
 - Tool catalog grows to 60 tools in embedded/sandbox mode (61 with the intervention gate enabled):
