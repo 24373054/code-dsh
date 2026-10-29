@@ -184,6 +184,28 @@ export of the external-service adapter has been removed.
 
 ## Release notes
 
+### 0.9.1 · Contrast hotfix
+
+- Status chips (待处理 / 生效中 / 放行) in the light theme were still too pale to read at a glance;
+  their label tone now mixes toward the foreground colour so every chip passes the contrast audit in
+  both themes.
+
+### 0.9.0 · Product experience
+
+- The workspace now reads like a product, not an engineering console: page copy, settings and empty
+  states use the language of payment operations, and developer-facing vocabulary (engine modes,
+  schema revisions, raw demo data) is either removed or moved behind a “技术详情 / Technical details”
+  disclosure.
+- A first-run guide explains the workflow in three steps (set boundaries → let agents work →
+  handle exceptions); a “体验模式 / Preview mode” chip explains what the sample workspace is and is
+  not, replacing the old sandbox wording.
+- Settings were rebuilt for operators: workspace profile, notification and display preferences,
+  data-and-backup actions, and an about section, with the technical fields tucked into a disclosure.
+- The plugin detail page is now a product overview (why you need it, what is inside, a typical day,
+  safety boundaries, privacy, FAQ) in both Chinese and English, and the package metadata was
+  rewritten to match.
+- Light and dark themes both pass the contrast audit; the full suite (159 offline tests) is green.
+
 ### 0.8.2
 
 - Dark-mode contrast fixes for the trust console: primary buttons now use DSH’s primary-fill /

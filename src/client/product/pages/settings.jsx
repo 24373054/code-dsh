@@ -1,6 +1,8 @@
 /**
- * 产品设置：组织信息、工作台偏好、数据管理与关于。
- * 演示数据仅保存在本机浏览器，页面不连接任何外部服务。
+ * 产品设置：工作区信息、提醒与显示、数据与隐私、关于。
+ *
+ * 信任运营台是本地优先的产品：工作区数据保存在本机插件目录，产品不连接任何云服务，
+ * 也不会把数据上传到外部。当前版本使用示例工作区，便于在接入真实数据前体验完整流程。
  */
 import { useState } from 'react'
 import { useActions, useWorld } from '../hooks.js'
@@ -35,10 +37,11 @@ const TIME_OPTIONS = [
   { value: 'exact', label: '精确时间（如 2026-10-29 18:06）' },
 ]
 
-const DATA_NOTES = [
-  '演示数据保存在本机，不会上传到外部服务。',
-  '导出快照会下载一份当前演示数据文件，便于评审留档或交付前备份。',
-  '重置会恢复初始演示数据，期间产生的审批、结案与报告记录将被清除且无法撤销。',
+const PRIVACY_NOTES = [
+  '本地优先：工作区数据保存在本机的插件数据目录，不依赖任何云端服务。',
+  '零外传：产品不会上传工作区数据，也不会把付款信息发送给第三方。',
+  '可导出：随时下载完整快照，用于评审、存档或迁移前的备份。',
+  '可恢复：一键恢复到示例初始状态，练习与演示产生的记录会被清除。',
 ]
 
 function pad2(value) {
@@ -51,10 +54,10 @@ function snapshotFilename(now = new Date()) {
     pad2(now.getMonth() + 1),
     pad2(now.getDate()),
   ].join('') + '-' + [pad2(now.getHours()), pad2(now.getMinutes()), pad2(now.getSeconds())].join('')
-  return `trust-platform-demo-${stamp}.json`
+  return `trust-workspace-${stamp}.json`
 }
 
-/** 下载当前演示数据的完整快照。 */
+/** 下载当前工作区的完整快照。 */
 function downloadWorldSnapshot(world) {
   const blob = new Blob([JSON.stringify(world, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -138,15 +141,16 @@ export function ProductSettingsPage() {
   const [pageSize, setPageSize] = useState('20')
   const [timeDisplay, setTimeDisplay] = useState('relative')
   const [resetConfirm, setResetConfirm] = useState('')
+  const [showTech, setShowTech] = useState(false)
 
   const savePreferences = () => {
-    toast.push('工作台偏好已保存', 'success')
+    toast.push('提醒与显示偏好已保存', 'success')
   }
 
   const handleExport = () => {
     try {
       downloadWorldSnapshot(world)
-      toast.push('演示数据已导出为快照文件', 'success')
+      toast.push('工作区快照已导出', 'success')
     } catch {
       toast.push('导出失败，请稍后重试', 'error')
     }
@@ -158,85 +162,105 @@ export function ProductSettingsPage() {
     if (!resetConfirmValid) return
     actions.resetDemo()
     setResetConfirm('')
-    toast.push('演示数据已重置为初始状态', 'success')
+    toast.push('工作区已恢复到示例初始状态', 'success')
   }
 
   return (
     <div className="tp-page">
       <PageHead
         title="设置"
-        desc="管理组织信息、工作台偏好与演示数据。"
+        desc="管理工作区信息、提醒偏好与本地数据。"
       />
 
-      <div className="tp-grid tp-grid-2" style={{ marginBottom: 16, alignItems: 'start' }}>
-        <Card title="组织信息" desc="当前登录组织的登记信息，仅供核对">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-            <Avatar name={org.name || '星桥支付'} seed={org.id || 'org'} size="lg" />
-            <div style={{ minWidth: 0 }}>
-              <div className="tp-strong" style={{ fontSize: 15 }}>{org.name || '未登记组织'}</div>
-              <div className="tp-faint" style={{ fontSize: 12, marginTop: 2 }}>
-                {org.domain || '—'} · {ORG_KIND[org.kind] || '组织'}
-              </div>
-            </div>
-            <div style={{ marginLeft: 'auto' }}>
-              <Tag tone={org.verified ? 'success' : 'neutral'} dot>{org.verified ? '已认证' : '待认证'}</Tag>
+      <Card
+        title="工作区"
+        desc="当前工作区创建在这台电脑上，数据不会离开本机。"
+        actions={<Tag tone="neutral" dot>本地工作区</Tag>}
+        style={{ marginBottom: 16 }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Avatar name={org.name || '星桥支付'} seed={org.id || 'org'} size="lg" />
+          <div style={{ minWidth: 0 }}>
+            <div className="tp-strong" style={{ fontSize: 15 }}>{org.name || '未命名工作区'}</div>
+            <div className="tp-faint" style={{ fontSize: 12, marginTop: 2 }}>
+              {ORG_KIND[org.kind] || '组织'} · {org.domain || '—'}
             </div>
           </div>
-          <KV
-            items={[
-              { k: '组织标识', v: shortId(org.id || '—') },
-              { k: '组织类型', v: ORG_KIND[org.kind] || '组织' },
-              { k: '接入域名', v: org.domain || '—' },
-              { k: '认证状态', v: <Tag tone={org.verified ? 'success' : 'neutral'} dot>{org.verified ? '已认证' : '待认证'}</Tag> },
-            ]}
-          />
-        </Card>
+          <div style={{ marginLeft: 'auto' }}>
+            <Tag tone={org.verified ? 'success' : 'neutral'} dot>{org.verified ? '已认证' : '待认证'}</Tag>
+          </div>
+        </div>
 
-        <Card
-          title="工作台偏好"
-          desc="调整提醒与列表的显示方式"
-          actions={<Tag tone="neutral">仅本机生效</Tag>}
+        <div className="tp-divider" style={{ margin: '14px 0 12px' }} />
+
+        <button
+          type="button"
+          className="tp-link-btn"
+          onClick={() => setShowTech(value => !value)}
+          aria-expanded={showTech}
         >
-          <PrefRow title="桌面通知" desc="案件升级、审批到期时提醒我">
-            <Toggle checked={notify} onChange={setNotify} label="桌面通知" />
-          </PrefRow>
-          <PrefRow title="每页数量" desc="列表页默认展示的条数">
-            <Select value={pageSize} onChange={setPageSize} options={PAGE_SIZE_OPTIONS} />
-          </PrefRow>
-          <PrefRow title="时间显示" desc="列表与详情中的时间展示方式" last>
-            <Select value={timeDisplay} onChange={setTimeDisplay} options={TIME_OPTIONS} />
-          </PrefRow>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-            <Button variant="primary" icon="check" onClick={savePreferences}>保存偏好</Button>
+          <Icon name={showTech ? 'chevronDown' : 'chevronRight'} size={13} />
+          {showTech ? '收起技术详情' : '技术详情'}
+        </button>
+        {showTech ? (
+          <div style={{ marginTop: 12 }}>
+            <KV
+              items={[
+                { k: '工作区标识', v: shortId(org.id || '—') },
+                { k: '认证主体类型', v: ORG_KIND[org.kind] || '组织' },
+                { k: '接入域名', v: org.domain || '—' },
+                { k: '认证状态', v: <Tag tone={org.verified ? 'success' : 'neutral'} dot>{org.verified ? '已认证' : '待认证'}</Tag> },
+              ]}
+            />
           </div>
-        </Card>
-      </div>
+        ) : null}
+      </Card>
 
       <Card
-        title="数据管理"
-        desc="演示数据保存在本机，支持导出快照与恢复初始状态"
+        title="提醒与显示"
+        desc="调整此设备上的提醒方式与列表显示。"
+        actions={<Tag tone="neutral">仅本机生效</Tag>}
+        style={{ marginBottom: 16 }}
+      >
+        <PrefRow title="桌面通知" desc="案件升级、审批到期时提醒我">
+          <Toggle checked={notify} onChange={setNotify} label="桌面通知" />
+        </PrefRow>
+        <PrefRow title="每页数量" desc="列表页默认展示的条数">
+          <Select value={pageSize} onChange={setPageSize} options={PAGE_SIZE_OPTIONS} />
+        </PrefRow>
+        <PrefRow title="时间显示" desc="列表与详情中的时间展示方式" last>
+          <Select value={timeDisplay} onChange={setTimeDisplay} options={TIME_OPTIONS} />
+        </PrefRow>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <Button variant="primary" icon="check" onClick={savePreferences}>保存偏好</Button>
+        </div>
+      </Card>
+
+      <Card
+        title="数据与隐私"
+        desc="工作区数据完全保存在本机，产品不连接任何云服务。"
         style={{ marginBottom: 16 }}
       >
         <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--tp-text-2)', fontSize: 13, lineHeight: 1.9 }}>
-          {DATA_NOTES.map(item => <li key={item}>{item}</li>)}
+          {PRIVACY_NOTES.map(item => <li key={item}>{item}</li>)}
         </ul>
 
         <div className="tp-divider" />
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', padding: '16px 0' }}>
           <div>
-            <div className="tp-strong" style={{ fontSize: 13 }}>导出演示数据</div>
-            <div className="tp-faint" style={{ fontSize: 12, marginTop: 2 }}>下载当前演示数据快照，文件名包含导出时间</div>
+            <div className="tp-strong" style={{ fontSize: 13 }}>导出工作区快照</div>
+            <div className="tp-faint" style={{ fontSize: 12, marginTop: 2 }}>下载一份完整数据文件，便于评审留档或交付前备份</div>
           </div>
-          <Button icon="download" onClick={handleExport}>导出演示数据</Button>
+          <Button icon="download" onClick={handleExport}>导出快照</Button>
         </div>
 
         <div className="tp-divider" />
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', padding: '16px 0' }}>
           <div>
-            <div className="tp-strong" style={{ fontSize: 13 }}>重置演示数据</div>
-            <div className="tp-faint" style={{ fontSize: 12, marginTop: 2 }}>恢复初始演示数据；请输入 RESET 确认操作</div>
+            <div className="tp-strong" style={{ fontSize: 13 }}>恢复示例数据</div>
+            <div className="tp-faint" style={{ fontSize: 12, marginTop: 2 }}>清除体验期间产生的记录，恢复为示例初始状态；请输入 RESET 确认</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
@@ -245,16 +269,16 @@ export function ProductSettingsPage() {
               value={resetConfirm}
               onChange={event => setResetConfirm(event.target.value)}
               placeholder="输入 RESET"
-              aria-label="输入 RESET 确认重置"
+              aria-label="输入 RESET 确认恢复示例数据"
             />
             <Button variant="danger" icon="refresh" disabled={!resetConfirmValid} onClick={handleReset}>
-              重置演示数据
+              恢复示例数据
             </Button>
           </div>
         </div>
       </Card>
 
-      <Card title="关于" desc="产品信息与运行环境">
+      <Card title="关于" desc="产品信息与隐私承诺">
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
           <div
             style={{
@@ -275,7 +299,6 @@ export function ProductSettingsPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span className="tp-strong" style={{ fontSize: 15 }}>{productName}</span>
               <Tag tone="info">v{PRODUCT_VERSION}</Tag>
-              <Tag tone="neutral" dot>沙箱演示数据</Tag>
             </div>
             <div className="tp-muted" style={{ fontSize: 13, lineHeight: 1.7, marginTop: 6 }}>
               让 AI 代理在人类设定的委托额度内行动：财务与合规团队设定边界、审批例外，
@@ -287,13 +310,15 @@ export function ProductSettingsPage() {
           items={[
             { k: '产品版本', v: `v${PRODUCT_VERSION}` },
             { k: '适用角色', v: '财务负责人 · 合规审计员' },
-            { k: '运行环境', v: <Tag tone="neutral" dot>沙箱演示数据</Tag> },
-            { k: '数据生成时间', v: world.seededAt ? fmtDateTime(world.seededAt) : '—' },
+            { k: '数据位置', v: '本机（不连接云服务）' },
+            { k: '示例数据生成时间', v: world.seededAt ? fmtDateTime(world.seededAt) : '—' },
           ]}
         />
+        <div className="tp-muted" style={{ fontSize: 12.5, lineHeight: 1.8, marginTop: 14 }}>
+          信任运营台是开源产品：核心代码公开可审计，数据默认留在本机。
+          当前版本使用示例工作区，仅用于产品体验，不构成真实支付或审计依据。
+        </div>
       </Card>
-
-      <div className="tp-footer-note">本演示数据仅用于产品体验，不构成真实支付或审计依据。</div>
     </div>
   )
 }

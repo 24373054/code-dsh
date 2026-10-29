@@ -4,6 +4,7 @@
  * Answers four questions at a glance: what needs me now, how much value moved,
  * is the delegation network healthy, and what happened recently.
  */
+import { useState } from 'react'
 import { useWorld } from '../hooks.js'
 import { useNavigation } from '../app/navigation.jsx'
 import {
@@ -15,6 +16,29 @@ import { Avatar, Bars, Button, Card, Donut, EmptyState, Legend, PageHead, Progre
 import { Icon } from '../ui/icons.jsx'
 
 const RISK_COLORS = { ALLOW: '#1f9d63', THROTTLE: '#0a6cff', DEFER: '#b36b00', BLOCK: '#d92d20' }
+
+
+/** First-run guidance, dismissed once per browser. */
+const ONBOARDING_KEY = 'dsh-trust-platform.onboarding.v1'
+
+function useOnboarding() {
+  const [visible, setVisible] = useState(() => {
+    try {
+      return window.localStorage.getItem(ONBOARDING_KEY) !== 'done'
+    } catch {
+      return true
+    }
+  })
+  const dismiss = () => {
+    try {
+      window.localStorage.setItem(ONBOARDING_KEY, 'done')
+    } catch {
+      // 忽略隐私模式下的存储限制
+    }
+    setVisible(false)
+  }
+  return [visible, dismiss]
+}
 
 /** Dashboard page. */
 export function DashboardPage() {
@@ -28,12 +52,13 @@ export function DashboardPage() {
   const activity = recentActivity(world, 7)
   const leaders = agentLeaderboard(world)
   const maxVolume = Math.max(...volumes.map(item => item.value), 1)
+  const [showOnboarding, dismissOnboarding] = useOnboarding()
 
   return (
     <div className="tp-page">
       <PageHead
         title="今天需要你关注的事情"
-        desc="代理正在按委托链执行交易。你只需处理被规则挑出来的例外。"
+        desc="代理正在按委托链执行交易，你只需处理被规则挑出来的例外。"
         actions={(
           <>
             <Button icon="plus" onClick={() => navigate('tasks', { create: true })}>新建付款任务</Button>
@@ -44,6 +69,38 @@ export function DashboardPage() {
         )}
       />
 
+
+      {showOnboarding ? (
+        <section className="tp-onboarding" aria-label="新手指引">
+          <div className="tp-onboarding-head">
+            <div>
+              <div className="tp-onboarding-title">三步开始使用信任运营台</div>
+              <div className="tp-onboarding-sub">先认识一下工作台：设定边界、放手执行、处理例外。</div>
+            </div>
+            <button type="button" className="tp-onboarding-close" aria-label="关闭新手指引" onClick={dismissOnboarding}>
+              <Icon name="x" size={13} />
+            </button>
+          </div>
+          <ol className="tp-onboarding-steps">
+            <li>
+              <span className="tp-onboarding-index">1</span>
+              <span><b>设定边界</b>：在「治理策略」里确定风险阈值，在「委托授权」里给每个代理设定单笔与每日额度。</span>
+            </li>
+            <li>
+              <span className="tp-onboarding-index">2</span>
+              <span><b>代理执行</b>：代理在你的授权范围内创建并提交付款任务，每一步都留痕。</span>
+            </li>
+            <li>
+              <span className="tp-onboarding-index">3</span>
+              <span><b>处理例外</b>：只有超出规则的动作会进入「审批」，其余自动完成。</span>
+            </li>
+          </ol>
+          <div className="tp-onboarding-actions">
+            <Button icon="checkCircle" onClick={() => go(approvals)}>看看待我审批</Button>
+            <Button variant="primary" icon="shield" onClick={() => go(delegations)}>查看委托授权</Button>
+          </div>
+        </section>
+      ) : null}
       <div className="tp-stat-grid">
         <StatCard label="待我审批" value={pending.length} unit="项" icon="shield" iconTone="var(--tp-warn)"
           foot={stats.overdueApprovals ? `${stats.overdueApprovals} 项已超时` : '全部按时'} />
@@ -180,7 +237,7 @@ export function DashboardPage() {
 
       <div className="tp-footer-note">
         <Icon name="lock" size={13} />
-        所有交易都留有可验证的签名事件。数据来自演示世界，刷新页面或重置后恢复。
+        所有交易都留有可验证的审计记录。当前为本地体验数据，恢复示例数据后回到初始状态。
       </div>
     </div>
   )

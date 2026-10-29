@@ -29,7 +29,7 @@ const TABS = [
   { id: 'agents', label: '代理', icon: 'users' },
   { id: 'delegations', label: '委托授权', icon: 'branch' },
   { id: 'governance', label: '治理策略', icon: 'sliders' },
-  { id: 'audit', label: '审计与案件', icon: 'fileText' },
+  { id: 'audit', label: '审计', icon: 'fileText' },
   { id: 'settings', label: '设置', icon: 'settings' }
 ]
 
@@ -45,6 +45,7 @@ export function Shell() {
   const [showSearch, setShowSearch] = useState(false)
   const [showBell, setShowBell] = useState(false)
   const [showAccount, setShowAccount] = useState(false)
+  const [showMode, setShowMode] = useState(false)
   const searchRef = useRef(null)
   const stats = useWorldStats(world)
   const unread = unreadNotifications(world)
@@ -57,6 +58,7 @@ export function Shell() {
         setShowSearch(false)
         setShowBell(false)
         setShowAccount(false)
+        setShowMode(false)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -94,7 +96,21 @@ export function Shell() {
             <div className="tp-brand-name">星桥支付 · 信任运营台</div>
             <div className="tp-brand-sub">代理交易的可审计工作台</div>
           </div>
-          <Tag tone="info" style={{ marginLeft: 10 }}>沙箱数据</Tag>
+          <div className="tp-mode-anchor">
+            <button type="button" className="tp-mode-chip" onClick={() => setShowMode(value => !value)} aria-expanded={showMode}>
+              <span className="tp-mode-dot" />
+              体验模式
+            </button>
+            {showMode ? (
+              <div className="tp-popover tp-mode-pop" role="dialog" aria-label="体验模式说明">
+                <div className="tp-strong" style={{ fontSize: 13 }}>本地体验工作区</div>
+                <p className="tp-mode-text">
+                  当前展示的是示例工作区：数据只保存在这台电脑上，不会上传，也不会发起真实支付。
+                  接入真实引擎后，这里会显示你的工作区状态。
+                </p>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="tp-topbar-right">

@@ -968,8 +968,8 @@ test('docs describe the embedded engine and start with a preview', () => {
   assert.match(readme, /0\.7\.0/, 'the README must announce 0.7.0')
   assert.match(englishDetail, /0\.7\.0/, 'DETAIL.md must describe the 0.7.0 changes')
   assert.match(chineseDetail, /0\.7\.0/, 'DETAIL.zh.md must describe the 0.7.0 changes')
-  assert.match(englishDetail, /Data management/i, 'DETAIL.md must document data management')
-  assert.match(chineseDetail, /数据管理/, 'DETAIL.zh.md must document data management')
+  assert.match(englishDetail, /Data (management|and backup)/i, 'DETAIL.md must document data management')
+  assert.match(chineseDetail, /数据与备份|数据管理/, 'DETAIL.zh.md must document data management')
 })
 
 test('matchesPlugin recognizes every plugin-manager subject shape', () => {

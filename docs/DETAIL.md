@@ -1,158 +1,108 @@
-![Trust platform settings page](preview.svg)
+![Trust Platform · the agent payment workspace](preview.svg)
 
-# Trust platform
+# A trustworthy workspace for your AI agents
 
-An embedded identity and payment-governance trust plane for multi-agent payment workflows. The whole
-trust plane runs **inside the DSH plugin process**: there is no external control-plane service to
-deploy, no HTTP backend and no `baseUrl` or bearer token to configure. The engine keeps its records in
-a profile-owned data directory, runs deterministically offline and never moves funds itself.
+Every day your agents pay invoices, reconcile ledgers and settle with vendors. Trust Platform lets you run them
+like a team: give each agent a budget and clear boundaries, let it work inside them, and only step in for the
+things that fall outside.
 
-A sandbox mode uses an in-memory store for experiments and is explicitly non-authoritative: sandbox
-records never count as a trust decision. The plugin never sends money or settles value in either mode.
+## Why you need it
 
-## What's new in 0.8.0
+An AI agent that can spend money is not a chatbot. It can misread an invoice, be tricked by a fake email, or
+quietly use its budget where it should not. The usual answer — an API key and a company card — gives it unlimited
+authority. Trust Platform takes a different route: **write down what each agent may do, and keep a record of
+everything it does.**
 
-![Docked trust console: overview](console-overview.png)
+- Every agent has a job description and a payment budget.
+- Unusual amounts, unfamiliar payees or over-budget payments stop and wait for you.
+- Every payment keeps a checkable trail from authorization to settlement.
 
-- **Docked trust console**: a shield button in the conversation header opens the console in DSH’s
-  right Sidebar, next to the chat. The conversation keeps running while the operator works, and the
-  column’s own close control returns to the full-width chat. It has eight tabs: Overview, Approvals,
-  Payment tasks, Agents, Delegations, Governance, Audit and Settings.
-- **End-to-end operator flows on demo data**: approve or deny an escalated exception with an audit
-  note, create a payment task, submit settlement, revoke a delegation, publish a draft policy, and
-  export or reset the demo world. Data lives in the browser; no backend is required.
-- **Traceable context**: task detail reconstructs the authorizing chain and effective limits, audit
-  events, reviews and evidence; agent and case pages show the full trail behind an exception.
-- **Chinese-first and theme-aware**: the workspace uses the language of a finance operator and
-  follows the DSH light/dark theme tokens.
-- This phase is front-end only; productization and the real-engine / real-money phases follow.
+## What is inside
 
-## What's new in 0.7.0
+Trust Platform runs as a DSH plugin. One click on the shield in a conversation docks the workspace beside the chat,
+so you can keep talking to your agent while clearing approvals.
 
-- **Tool catalog grows to 60 tools** in embedded/sandbox mode (61 with the intervention gate
-  enabled): `read_delegation_chain` resolves a delegation chain root → leaf with its effective
-  limits and `chain_trustworthy`, and `settle_payment_task` runs a signed `FINAL SETTLE` close-loop
-  (`CONFIRMED → AUDITED → CLOSED`) that refuses when verification is not `VALID`.
-- **Multi-level delegation chains** — authorization follows delegated capabilities across multiple
-  links, and a broken, expired or over-scoped link fails closed with `DEFER`, never `ALLOW`.
-- **Signed settlement close-loop** — payment tasks can be closed out against signed settlement
-  evidence, so receipts and audit records link back to a verifiable settlement record. The engine
-  records evidence; it still never transfers funds.
-- **Governance policy and model activation** — policy versions and risk-model revisions can be
-  activated at runtime in addition to the editable amount limits and risk thresholds.
-- **Data management** — the settings page now shows the state-file storage card, downloads the full
-  engine state as JSON and resets records behind a typed `RESET` confirmation.
-- **Crash recovery** — the embedded engine reloads its state file after a restart and reports the
-  recovery result in the data-management card.
+| Page | What you do there |
+| --- | --- |
+| Overview | Today's items that need you, monthly volume, delegation health, 7-day trend and risk mix |
+| Approvals | Clear the exceptions flagged by policy; approvals resume the task, rejections stop it with a record |
+| Payment tasks | Follow each payment's progress, risk decision, executing agent and audit trail |
+| Agents | Meet your agent team: duties, trust score, limits, success rate and recent activity |
+| Delegations | Set each agent's single-payment cap, daily cap, validity window and allowed actions |
+| Governance | Tune the block / escalate / throttle risk thresholds and publish new policy versions |
+| Audit & cases | Review escalated cases, evidence coverage and generate reports for finance and compliance |
+| Settings | Workspace info, notification preferences, data export and reset |
 
-## What you get
+## A typical day
 
-- An embedded trust plane whose identity, delegation, payment-task, operation-event, risk and
-  execution-receipt records are stored in the profile's data directory.
-- Eight compact trust cards in the conversation with a localized title, a status badge, the result
-  `decision` badge when present, a one-line code/message summary and a raw-JSON disclosure.
-- A plugin overview panel in Settings → Plugins → DSH Trust Platform that polls the engine every five
-  seconds and keeps the last good snapshot when a refresh fails.
-- An editable settings page in Settings → Trust Platform for the actor DID, the
-  intervention-execution gate and the risk policy limits.
-- A data-management section with the storage card, JSON export and a guarded reset.
-- A docked product console (0.8.0) in the conversation’s right Sidebar: an eight-tab workspace
-  (Overview, Approvals, Payment tasks, Agents, Delegations, Governance, Audit, Settings) with
-  complete operator flows on a local demo world; the chat stays visible beside it.
-- Localized plugin metadata for the harness plugin manager: English and Chinese detail pages.
+1. **Start with the overview.** Three items are already ranked: an overdue review, a blocked payment, an escalated case.
+2. **Clear the exceptions.** Open the review, check the risk score and the agent involved, then approve — the task resumes on its own.
+3. **Check the boundaries.** Confirm each agent's caps in Delegations; expiring limits are flagged ahead of time.
+4. **Deliver the audit.** Close the case in Audit & cases and export the report for finance or compliance.
 
-## Install
+## Safety boundaries
 
-```sh
-npm install @sealwax/dsh-trust-platform
-dsh plugin --profile demo add @sealwax/dsh-trust-platform
-dsh --profile demo --dump-config   # shows the trust-platform-tools row
-```
-
-A local checkout can be linked the same way with `dsh plugin --profile demo add /path/to/code-dsh`.
-The embedded engine owns its data directory; the profile configures no control-plane address or
-token.
-
-## Settings
-
-The browser half reads `GET /trust-platform/api/settings` and `GET /trust-platform/api/health` every
-10 seconds while the page is mounted. Saving sends only the changed fields to
-`PUT /trust-platform/api/settings`; a rejected patch returns `422` and its message is rendered next
-to the form instead of discarding the operator's changes. Unsaved edits survive refreshes, Cancel
-restores the last saved snapshot and Apply defaults fills the form from the engine's startup policy.
-
-| Control | Field | Notes |
-| --- | --- | --- |
-| Actor DID | `actorDid` | 3–200 characters; default actor for engine calls. |
-| Intervention gate | `allowInterventionExecution` | Enables `execute_intervention`; off by default. |
-| Policy version | `policyVersion` | 3–120 characters. |
-| Amount limits | `singleAmountLimit`, `dailyAmountLimit` | Positive amounts up to 1,000,000,000,000. |
-| Risk thresholds | `riskBlockThreshold`, `riskDeferThreshold`, `riskThrottleThreshold` | Numbers between 0 and 1; block ≥ defer ≥ throttle. |
-| Default trust score | `defaultTrustScore` | Number between 0 and 1. |
-
-## Data management
-
-The settings page renders a storage card driven by `GET /trust-platform/api/storage`: data directory,
-state file, file size, whether the file exists, last saved time, schema version and the recovery
-state. A `write_error` is surfaced as a warning instead of hiding the card, and a missing storage
-capability renders a localized `503` state.
-
-- **Export data** downloads the complete engine state as JSON from
-  `GET /trust-platform/api/export` (attachment filename `trust-platform-state-<timestamp>.json`, at
-  most 8 MiB; a larger state returns `413`). The last snapshot is kept on screen when an export
-  fails.
-- **Reset data** deletes every engine record with `POST /trust-platform/api/reset`, body
-  `{"confirm": true}`, and is only enabled after the operator types `RESET` into the confirmation
-  field. Runtime settings are kept across a reset.
-- **Refresh** re-reads the storage card and the settings snapshot.
-
-All routes are same-origin, use the GUI session and are rendered as localized, retryable states on
-`403`, `404`, `413`, `422`, `500`, `503`, invalid JSON or network failure. The browser half sends no
-telemetry and no data leaves the DSH origin.
-
-## Tools in the conversation
-
-The eight governed calls `register_identity`, `get_identity_status`, `verify_credential`,
-`check_authorization`, `create_payment_task`, `get_risk_decision`, `verify_operation_event` and
-`get_execution_receipt` render as trust cards. Other engine tools — including
-`read_delegation_chain` and `settle_payment_task` — use the host's default tool row. The host half
-returns the canonical `succeeded()`/`failed()` JSON envelope; the cards parse it defensively and
-fall back to the raw text when a payload is malformed, so a broken result never throws inside the
-conversation.
+- **Narrowing delegations.** Authority flows down like approval limits in a company: each level can only narrow the
+  one above it, never widen it. Revoking or expiring a parent removes the child's authority immediately.
+- **Exceptions only.** Low-risk payments go through, medium-risk ones are throttled, high-risk ones wait for a human,
+  and clear anomalies are blocked. You only handle what policy flags.
+- **Full audit trail.** Every authorization, approval and settlement writes an audit record with time, agent, amount
+  and evidence.
+- **Funds stay safe.** Trust Platform never moves money and never holds it: it decides *whether, by whom and with what
+  evidence* a payment can happen. The actual transfer is made by the payment channel you connect (real channels arrive
+  in a later release).
+- **Data stays local.** Workspace data lives on this computer; nothing is uploaded.
 
 ## Data and privacy
 
-Everything runs offline: no telemetry, no external network and no data leaves the DSH origin. The
-browser half only knows fixed same-origin routes under `/trust-platform/api`. Failed refreshes keep
-the last good snapshot, every failure state is localized and retryable, and the locale dictionaries
-fall back to English when a visible string is missing in the active language.
+- **Local first** — workspace data is stored on this machine; the product does not use any cloud service.
+- **No telemetry** — the product never uploads workspace data or shares payment details with third parties.
+- **Exportable** — download a full snapshot at any time for review, archiving or migration.
+- **Recoverable** — restore the sample workspace with one click; records created while experimenting are cleared.
 
-## Safety invariants
+## Release notes
 
-- The plugin never moves funds. `create_payment_task` records an intent and the signed settlement
-  close-loop records and verifies settlement evidence; neither initiates a transfer.
-- `check_authorization` performs a deterministic, conservative check of the delegation record:
-  status, validity window, delegated action, subject binding, amount/daily limits, asset scope and —
-  when the task is supplied — root issuer. Missing or unreadable data yields `DEFER`, never `ALLOW`.
-- A risk decision never grants payment authorization: `get_risk_decision` reports
-  `authorization_effect: "NONE"`.
-- `verify_operation_event` with an unsigned/unverified event reports `UNKNOWN`, never `VALID`.
-- Warning-level or step-up decisions do not pass as approvals; only an explicit `ALLOW` authorization
-  can be used by `create_payment_task`.
-- `execute_intervention` is absent unless `allowInterventionExecution` is explicitly enabled, and it
-  applies an intervention decision rather than moving funds itself.
-- The embedded engine marks its results authoritative; sandbox results are explicitly
-  non-authoritative and unknown or unreadable data never yields `ALLOW`.
+### 0.8.2 · Experience and themes
 
-## Build and test
+- New dark-mode contrast: buttons, tags and status colors are readable in both themes.
+- Product language across the workspace — fewer technical terms, words operations and finance teams already use.
+- A three-step first-run guide that explains the workflow in under a minute.
 
-```sh
-npm run build:client   # src/client/index.jsx -> lib/client.js (lazy-CJS wrapper, size check)
-node --test tests/client-bundle.test.js
-npm run pack:check     # rebuild the bundle, then npm pack --dry-run
-```
+### 0.8.0 · Dockable workspace
 
-The bundle test executes `lib/client.js` in a `node:vm` sandbox with stubbed baseline modules and a
-stubbed `fetch`, asserting the registered settings/overview/tool slots, the settings form and
-data-management markers, the locale metadata, the lazy-CJS envelope and that only `react` modules
-are imported. It is fully offline and never starts a browser or a server.
+- The workspace docks beside the conversation, so you can approve and chat at the same time.
+- Eight pages cover the loop from delegation, risk and payment to approval, audit and reporting.
+- The sample workspace is fully interactive: approve/reject reviews, create payments, settle, revoke delegations,
+  publish policies and export data.
+
+### 0.7.0 · Multi-level delegations and signed settlement
+
+- Delegation chains where every level can only narrow caps and actions.
+- Signed settlement credentials and execution receipts make settlement results verifiable.
+- Policy versions and risk-model versions can be published from the workspace.
+
+### 0.6.x · Trust Platform
+
+- The trust plane is embedded in DSH as a plugin — no separate backend to deploy.
+- Identities, credentials, authorizations, tasks, events and receipts are all local and inspectable.
+
+## FAQ
+
+**Where is my data stored?**
+On this machine, in the plugin's data folder. See *Settings → Data and backup* to inspect the location or export a snapshot.
+
+**Can I use real payments?**
+This release is a product preview that runs on the sample workspace and never moves real money. A real payment channel
+(test environment first) will be added later.
+
+**Does it upload my data?**
+No. There is no telemetry and no cloud service; every request stays on this machine.
+
+**Can a team use it together?**
+This release is a single-user local workspace. Team collaboration and multi-workspace support arrive with the backend.
+
+## Next
+
+- **Product polish** — refine the details, guidance and empty states so day one feels easy.
+- **Real data** — connect the Stripe test environment first and run the full flow on real, usable test data.
+- **Backend and multi-tenancy** — service, permissions and team collaboration in a later phase.

@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Trust platform",
-    "description": "Embedded identity and payment-governance trust plane for multi-agent cross-border payment workflows — delegation chains, signed settlement evidence and a built-in DSH product workspace.",
+    "description": "A payment workspace for AI agents: give each agent a budget and approval boundaries, let it run inside them, and handle only the exceptions.",
     "detail": "docs/DETAIL.md"
   }
 }
