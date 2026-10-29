@@ -184,6 +184,16 @@ export of the external-service adapter has been removed.
 
 ## Release notes
 
+### 0.8.2
+
+- Dark-mode contrast fixes for the trust console: primary buttons now use DSH’s primary-fill /
+  foreground pair instead of the brand text token (previously white-on-white in dark mode), semantic
+  status colors follow the shell’s success / warning / danger / business tokens, native controls
+  inherit the shell color-scheme, and list rows no longer leak the browser’s default button chrome.
+- Dialog and drawer overlays are scoped to the sidebar column, so the conversation beside it stays
+  undimmed and the column’s own controls stay reachable; small docked-width spacing fixes.
+- 159 offline tests green; verified against a real DSH session in both light and dark themes.
+
 ### 0.8.1
 
 - The trust console is now a tab in DSH’s right Sidebar, opened from a shield button in the

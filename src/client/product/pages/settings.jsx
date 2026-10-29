@@ -104,7 +104,7 @@ function Toggle({ checked, onChange, label }) {
         padding: 0,
         position: 'relative',
         cursor: 'pointer',
-        background: checked ? 'var(--tp-accent)' : 'var(--tp-surface-3)',
+        background: checked ? 'var(--tp-accent-fill)' : 'var(--dsw-alias-border-l3, var(--tp-surface-3))',
         transition: 'background .2s',
       }}
     >
@@ -116,7 +116,7 @@ function Toggle({ checked, onChange, label }) {
           width: 18,
           height: 18,
           borderRadius: '50%',
-          background: '#fff',
+          background: checked ? 'var(--tp-on-accent)' : 'var(--dsw-alias-switch-thumb, #ffffff)',
           boxShadow: '0 1px 3px rgba(0, 0, 0, 0.28)',
           transition: 'left .2s',
         }}
