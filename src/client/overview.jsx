@@ -33,9 +33,29 @@ function counterValue(counts, key) {
 }
 
 /** Render a protocol decision pill, if the payload carries one. */
-function DecisionPill({ decision }) {
+function DecisionPill({ decision, t }) {
   if (typeof decision !== 'string' || !decision) return null
-  return <Badge tone={decisionTone(decision)}>{decision}</Badge>
+  const key = `overview.decision.${decision.toLowerCase()}`
+  return (
+    <Badge tone={decisionTone(decision)}>
+      {hasCopy(key) ? translate(t, key) : decision}
+    </Badge>
+  )
+}
+
+/** Map a raw operation event type to product language, with a safe fallback. */
+function eventLabel(t, eventType) {
+  if (typeof eventType !== 'string' || !eventType) return translate(t, 'overview.event.other')
+  const key = `overview.event.${eventType}`
+  return hasCopy(key) ? translate(t, key) : translate(t, 'overview.event.other')
+}
+
+/** Show the readable name of a DID, keeping the full identifier in the tooltip. */
+function actorName(actor) {
+  if (typeof actor !== 'string' || !actor) return '—'
+  if (!actor.startsWith('did:')) return actor
+  const parts = actor.split(':')
+  return parts[parts.length - 1] || actor
 }
 
 /** The panel body; only mounted for this package's subject. */
@@ -50,10 +70,11 @@ function OverviewBody({ t }) {
 
   const mode = plugin && typeof plugin.mode === 'string' && plugin.mode ? plugin.mode : null
   const authoritative = Boolean(plugin && plugin.authoritative === true)
-  const source = plugin && typeof plugin.source === 'string' && plugin.source ? plugin.source : null
   const version = plugin && typeof plugin.version === 'string' && plugin.version ? plugin.version : null
   const healthText = health && typeof health.status === 'string' && health.status
-    ? health.status
+    ? (hasCopy(`overview.health.${health.status}`)
+      ? translate(t, `overview.health.${health.status}`)
+      : translate(t, 'overview.health.unknown'))
     : translate(t, 'overview.health.unknown')
 
   const errorText = error ? describeError(error, t) : null
@@ -98,7 +119,6 @@ function OverviewBody({ t }) {
       {data ? (
         <>
           <div style={styles.metaRow}>
-            {source ? <span>{translate(t, 'overview.source', { source })}</span> : null}
             <span>{translate(t, 'overview.health')}: {healthText}</span>
             {version ? <span style={styles.mono}>{`v${version}`}</span> : null}
           </div>
@@ -120,14 +140,14 @@ function OverviewBody({ t }) {
             <ul style={styles.list}>
               {events.map((event, index) => {
                 const item = event && typeof event === 'object' ? event : {}
-                const eventType = typeof item.event_type === 'string' && item.event_type ? item.event_type : '—'
-                const actor = typeof item.actor_did === 'string' && item.actor_did ? item.actor_did : '—'
+                const eventType = typeof item.event_type === 'string' && item.event_type ? item.event_type : ''
+                const actor = typeof item.actor_did === 'string' && item.actor_did ? item.actor_did : ''
                 const occurred = formatTime(item.occurred_at) || '—'
                 return (
                   <li key={index} style={styles.eventRow}>
-                    <span style={styles.eventType}>{eventType}</span>
-                    <DecisionPill decision={item.decision} />
-                    <span style={styles.eventActor} title={actor}>{actor}</span>
+                    <span style={styles.eventType}>{eventLabel(t, eventType)}</span>
+                    <DecisionPill decision={item.decision} t={t} />
+                    <span style={styles.eventActor} title={actor}>{actorName(actor)}</span>
                     <span style={styles.eventTime}>{occurred}</span>
                   </li>
                 )

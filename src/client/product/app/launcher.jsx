@@ -9,7 +9,7 @@
  */
 import { translate } from '../../format.js'
 import { ensureProductStyles } from '../ui/styles.js'
-import { Icon } from '../ui/icons.jsx'
+import { TrustPlatformPanelIcon } from './panel-icon.jsx'
 
 /**
  * Session-header launcher for the docked console.
@@ -28,7 +28,7 @@ export function TrustConsoleLauncher({ t, openConsole }) {
       aria-label={label}
       onClick={() => { if (typeof openConsole === 'function') openConsole() }}
     >
-      <Icon name="shield" size={16} strokeWidth={1.9} />
+      <TrustPlatformPanelIcon size={16} />
     </button>
   )
 }

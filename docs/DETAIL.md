@@ -19,8 +19,8 @@ everything it does.**
 
 ## What is inside
 
-Trust Platform runs as a DSH plugin. One click on the shield in a conversation docks the workspace beside the chat,
-so you can keep talking to your agent while clearing approvals.
+Trust Platform runs as a DSH plugin. One click on the workspace button in a conversation docks the console beside
+the chat, so you can keep talking to your agent while clearing approvals.
 
 | Page | What you do there |
 | --- | --- |
@@ -30,7 +30,7 @@ so you can keep talking to your agent while clearing approvals.
 | Agents | Meet your agent team: duties, trust score, limits, success rate and recent activity |
 | Delegations | Set each agent's single-payment cap, daily cap, validity window and allowed actions |
 | Governance | Tune the block / escalate / throttle risk thresholds and publish new policy versions |
-| Audit & cases | Review escalated cases, evidence coverage and generate reports for finance and compliance |
+| Audit | Review escalated cases, evidence coverage and generate reports for finance and compliance |
 | Settings | Workspace info, notification preferences, data export and reset |
 
 ## A typical day
@@ -38,7 +38,7 @@ so you can keep talking to your agent while clearing approvals.
 1. **Start with the overview.** Three items are already ranked: an overdue review, a blocked payment, an escalated case.
 2. **Clear the exceptions.** Open the review, check the risk score and the agent involved, then approve — the task resumes on its own.
 3. **Check the boundaries.** Confirm each agent's caps in Delegations; expiring limits are flagged ahead of time.
-4. **Deliver the audit.** Close the case in Audit & cases and export the report for finance or compliance.
+4. **Deliver the audit.** Close the case in Audit and export the report for finance or compliance.
 
 ## Safety boundaries
 
@@ -48,9 +48,9 @@ so you can keep talking to your agent while clearing approvals.
   and clear anomalies are blocked. You only handle what policy flags.
 - **Full audit trail.** Every authorization, approval and settlement writes an audit record with time, agent, amount
   and evidence.
-- **Funds stay safe.** Trust Platform never moves money and never holds it: it decides *whether, by whom and with what
-  evidence* a payment can happen. The actual transfer is made by the payment channel you connect (real channels arrive
-  in a later release).
+- **Funds stay safe.** Trust Platform never moves money, never holds it and never stores a payment channel's keys:
+  it decides *whether, by whom and with what evidence* a payment can happen, and the transfer itself is made by the
+  payment channel you connect.
 - **Data stays local.** Workspace data lives on this computer; nothing is uploaded.
 
 ## Data and privacy
@@ -62,11 +62,22 @@ so you can keep talking to your agent while clearing approvals.
 
 ## Release notes
 
-### 0.8.2 · Experience and themes
+### 0.9.2 · Brand and details
 
-- New dark-mode contrast: buttons, tags and status colors are readable in both themes.
+- New brand mark: a solid suspension bridge for 星桥, consistent across the plugin card, the console header and the sidebar.
+- Interface detail pass: consistent light/dark contrast for buttons, tags and status colors; no unfinished placeholder copy.
+- The detail page and in-product explanations use final product language and only describe what the product does today.
+
+### 0.9.0 · Product experience
+
 - Product language across the workspace — fewer technical terms, words operations and finance teams already use.
-- A three-step first-run guide that explains the workflow in under a minute.
+- A three-step first-run guide plus a clearer 体验模式 note: data lives on this machine only.
+- *Data and backup* supports exporting a workspace snapshot and restoring the sample workspace.
+
+### 0.8.2 · Dark mode and readability
+
+- Dark-mode contrast fixes: buttons, tags and status colors are readable in dark theme.
+- Status tags get darker text in light theme so they no longer wash out.
 
 ### 0.8.0 · Dockable workspace
 
@@ -81,28 +92,23 @@ so you can keep talking to your agent while clearing approvals.
 - Signed settlement credentials and execution receipts make settlement results verifiable.
 - Policy versions and risk-model versions can be published from the workspace.
 
-### 0.6.x · Trust Platform
-
-- The trust plane is embedded in DSH as a plugin — no separate backend to deploy.
-- Identities, credentials, authorizations, tasks, events and receipts are all local and inspectable.
-
 ## FAQ
 
 **Where is my data stored?**
 On this machine, in the plugin's data folder. See *Settings → Data and backup* to inspect the location or export a snapshot.
 
 **Can I use real payments?**
-This release is a product preview that runs on the sample workspace and never moves real money. A real payment channel
-(test environment first) will be added later.
+The product never moves money, never holds it and never stores a payment channel's keys. It decides *whether, by whom
+and with what evidence* a payment can happen and keeps a checkable record; the transfer itself is made by the payment
+channel you connect.
 
 **Does it upload my data?**
 No. There is no telemetry and no cloud service; every request stays on this machine.
 
 **Can a team use it together?**
-This release is a single-user local workspace. Team collaboration and multi-workspace support arrive with the backend.
+This workspace is built for a single local deployment: data lives on this machine and the console starts with DSH.
 
-## Next
+---
 
-- **Product polish** — refine the details, guidance and empty states so day one feels easy.
-- **Real data** — connect the Stripe test environment first and run the full flow on real, usable test data.
-- **Backend and multi-tenancy** — service, permissions and team collaboration in a later phase.
+Trust Platform is an auditable governance layer for agent payments: clear boundaries, exceptions handled by people,
+and every payment on the record.

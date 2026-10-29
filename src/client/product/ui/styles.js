@@ -453,10 +453,9 @@ body[data-ds-dark-theme] .tp-root {
 .tp-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .tp-brand-mark {
   width: 30px; height: 30px; flex: none; border-radius: 9px;
-  display: grid; place-items: center; color: #fff;
-  background: linear-gradient(135deg, #0a6cff, #7b5cff);
-  box-shadow: 0 4px 12px rgba(10, 108, 255, 0.28);
+  display: grid; place-items: center; overflow: hidden;
 }
+.tp-brand-mark svg { display: block; }
 .tp-brand-text { min-width: 0; }
 .tp-brand-name { font-size: 13.5px; font-weight: 700; letter-spacing: -0.1px; white-space: nowrap; }
 .tp-brand-sub { font-size: 11px; color: var(--tp-text-3); font-weight: 500; white-space: nowrap; }

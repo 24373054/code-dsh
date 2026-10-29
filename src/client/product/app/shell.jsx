@@ -12,6 +12,7 @@ import { searchAll, unreadNotifications } from '../selectors.js'
 import { fmtMoney, fmtRelative } from '../ui/format.js'
 import { Avatar, IconButton, Tag } from '../ui/primitives.jsx'
 import { Icon } from '../ui/icons.jsx'
+import { BrandTile } from './brand.jsx'
 import { DashboardPage } from '../pages/dashboard.jsx'
 import { ApprovalsPage } from '../pages/approvals.jsx'
 import { TasksPage, TaskDetailPage } from '../pages/tasks.jsx'
@@ -91,10 +92,10 @@ export function Shell() {
     <div className="tp-shell">
       <header className="tp-topbar">
         <div className="tp-brand">
-          <span className="tp-brand-mark"><Icon name="shield" size={17} strokeWidth={2} /></span>
+          <span className="tp-brand-mark"><BrandTile size={30} rounding={9} /></span>
           <div className="tp-brand-text">
-            <div className="tp-brand-name">星桥支付 · 信任运营台</div>
-            <div className="tp-brand-sub">代理交易的可审计工作台</div>
+            <div className="tp-brand-name">信任运营台</div>
+            <div className="tp-brand-sub">星桥支付 · 让每个代理在边界内工作</div>
           </div>
           <div className="tp-mode-anchor">
             <button type="button" className="tp-mode-chip" onClick={() => setShowMode(value => !value)} aria-expanded={showMode}>

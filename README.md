@@ -120,7 +120,7 @@ offline and without a browser.
 ## Product workspace (0.8.0)
 
 The 0.8.0 release adds the first product surface on top of the governed tools: a **trust operations
-workspace** that docks into DSH’s right Sidebar from a shield button in the conversation header. The
+workspace** that docks into DSH’s right Sidebar from a workspace button in the conversation header. The
 conversation stays in view beside it, DSH’s own column controls close it, and everything inside is
 rendered by the plugin — no separate web app, no extra port.
 
@@ -184,6 +184,17 @@ export of the external-service adapter has been removed.
 
 ## Release notes
 
+### 0.9.2 · Brand and finishing touches
+
+- A new brand mark for 信任运营台 / Trust Operations Console: a solid suspension-bridge silhouette
+  on a flat ink tile, monochrome and legible from the 44 px plugin card down to the 16 px header
+  control. The gradient shield tile is gone from the plugin icon, console header, header launcher
+  and detail-page artwork.
+- The plugin detail page now describes the finished product only: the “接下来 / Next” roadmap block
+  and “later release” promises were removed, and the preview artwork was redrawn as a brand banner.
+- Technical strings on the detail-page overview panel were productized: health reads “正常 / Healthy”,
+  recent activity uses product event names (凭证签发、准入检查、付款任务进度) and readable actor names.
+
 ### 0.9.1 · Contrast hotfix
 
 - Status chips (待处理 / 生效中 / 放行) in the light theme were still too pale to read at a glance;
@@ -218,7 +229,7 @@ export of the external-service adapter has been removed.
 
 ### 0.8.1
 
-- The trust console is now a tab in DSH’s right Sidebar, opened from a shield button in the
+- The trust console is now a tab in DSH’s right Sidebar, opened from a workspace button in the
   conversation header; the chat stays visible beside it and the column’s own close control returns
   to the conversation. No more full-frame takeover and no dead end.
 - Docked layout pass: compact top bar, fitting tab strip, single-column detail pages, responsive
