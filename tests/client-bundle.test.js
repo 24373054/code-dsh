@@ -122,7 +122,11 @@ const reactStub = {
   useEffect: () => {},
   useCallback: (callback) => callback,
   useRef: (value) => ({ current: value }),
-  useMemo: (factory) => factory()
+  useMemo: (factory) => factory(),
+  createContext: (defaultValue) => ({ defaultValue, Provider: Symbol("react.provider"), Consumer: Symbol("react.consumer") }),
+  useContext: () => null,
+  useSyncExternalStore: (subscribe, getSnapshot) => getSnapshot(),
+  useLayoutEffect: () => {}
 }
 
 const jsxRuntimeStub = {
@@ -308,7 +312,20 @@ test('apply registers the plugin-manager overview entries', () => {
   assert.equal(badge.options.id, 'trust-platform-badge')
   assert.equal(badge.options.locale, NS)
 
-  assert.equal(registrations.length, 11)
+  const mainPanel = registrations.find((entry) => entry.options.name === "main")
+  assert.ok(mainPanel, "the product console must register as a main panel")
+  assert.equal(mainPanel.options.key, "trust-platform")
+  assert.equal(mainPanel.options.locale, NS)
+  assert.equal(typeof mainPanel.component, "function")
+
+  const railEntry = registrations.find((entry) => entry.options.name === "sidebar.panellist")
+  assert.ok(railEntry, "the console must have its own sidebar entry")
+  assert.equal(railEntry.options.id, "trust-platform")
+  assert.equal(railEntry.options.locale, NS)
+  assert.equal(railEntry.options.label(), en["panel.label"])
+  assert.equal(typeof railEntry.component, "function")
+
+  assert.equal(registrations.length, 13)
 })
 
 test('apply registers the editable settings section', () => {
@@ -927,5 +944,5 @@ test('overview responses are accepted flattened or wrapped', () => {
 test('the artifact respects the size budget', () => {
   const bytes = statSync(BUNDLE).size
   assert.ok(bytes > 0)
-  assert.ok(bytes < 128 * 1024, `bundle is ${bytes} bytes, expected under 128 KiB`)
+  assert.ok(bytes < 512 * 1024, `bundle is ${bytes} bytes, expected under 512 KiB`)
 })

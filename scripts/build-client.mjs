@@ -41,7 +41,9 @@ const BASELINE = [
 ]
 
 /** Refuse to ship an artifact that clearly pulled in a dependency by mistake. */
-const SIZE_BUDGET = 128 * 1024
+// Phase-1 product console: the bundle now ships the full in-DSH workspace
+// (shell, dashboard, pages, demo data) as well as the original cards/settings UI.
+const SIZE_BUDGET = 512 * 1024
 
 const result = await build({
   entryPoints: [ENTRY],

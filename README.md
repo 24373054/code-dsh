@@ -111,11 +111,47 @@ npm run build:client   # src/client/index.jsx -> lib/client.js (lazy-CJS wrapper
 `src/client/` holds the source: `index.jsx` (registrations), `toolviews.jsx`, `overview.jsx`,
 `settings.jsx`, `settings-data.js` (transport, patch and validation model), `settings-store.js`
 (polling hook), `overview-data.js` (shared overview transport), `locales.js` (zh/en dictionaries),
-`format.js` (payload parsing) and `styles.js` (inline styles using DSH design-token CSS variables
-with fallbacks). `tests/client-bundle.test.js` builds the bundle, executes it in a `node:vm` sandbox
+`format.js` (payload parsing), `styles.js` (inline styles using DSH design-token CSS variables
+with fallbacks) and `product/` (the 0.8.0 product workspace: `app/`, `pages/`, `ui/`, `mock/`). `tests/client-bundle.test.js` builds the bundle, executes it in a `node:vm` sandbox
 with stubbed baseline modules and the `fetch` stub, and asserts the registered slots, the settings
 form markers, the locale metadata, the module envelope and the absence of non-baseline imports —
 offline and without a browser.
+
+## Product workspace (0.8.0)
+
+The 0.8.0 release adds the first product surface on top of the governed tools: a full **trust
+operations workspace** that runs as one DSH main panel. A global sidebar entry (信任平台 / Trust
+platform) opens it, and everything inside is rendered by the plugin — no separate web app, no extra
+port.
+
+![信任平台产品工作台 · 总览](docs/console-overview.png)
+
+![审批工作台](docs/console-approvals.png)
+
+The workspace ships eight tabs, in the order an operator actually works:
+
+| Tab | What it answers |
+| --- | --- |
+| 总览 / Overview | What needs attention today: pending approvals, month volume, delegation health, open cases, 7-day volume, risk-decision mix, recent signed events, agent activity. |
+| 审批 / Approvals | The escalated exceptions only. Each card carries the risk score, task amount, executing agent and the delegation context needed for an approve/deny decision with an audit note. |
+| 付款任务 / Payment tasks | Every payment with its risk decision, status, 7-step progress, executing agent and a full detail page (chain, effective limits, audit events, reviews, evidence, settlement). |
+| 代理 / Agents | The agent roster as a workforce: trust score, monthly volume, success rate, declared capabilities and credentials, plus per-agent detail pages. |
+| 委托授权 / Delegations | The delegated authority chain: per-link and chain-wide limits, used-today totals, validity windows, remaining validity and revocation. |
+| 治理策略 / Governance | Risk policy versions, thresholds (block / step-up / throttle), model revisions, drafts and the publish action with version history. |
+| 审计与案件 / Audit & cases | Cases under investigation, planned evidence coverage and reports, with per-case detail and investigation records. |
+| 设置 / Settings | Organization profile, workspace preferences, demo-data export and a typed-`RESET` restore. |
+
+Phase 1 (this release) runs on a local **demo world** persisted to `localStorage`, so the workspace
+is fully interactive without a backend: approvals move tasks forward, settlement closes a task and
+appends a verified final event, publishing a draft policy updates the thresholds, and the demo data
+can be exported or reset. The store is deliberately isolated behind `subscribe / getSnapshot /
+actions`; phase 2 will replace it with the embedded engine's browser route and phase 3 with real
+money movement through licensed providers. The workspace UI is Chinese-first, follows the DSH theme
+tokens (light and dark) and uses no term a finance operator would not recognize.
+
+Like every other 0.8.0 screen, the workspace is plain static assets inside the plugin package. It
+adds no network calls besides the DSH session and does not change the tool catalog or the safety
+invariants below.
 
 ## Package exports
 
@@ -147,6 +183,17 @@ export of the external-service adapter has been removed.
   and unknown or unreadable data never yields `ALLOW`.
 
 ## Release notes
+
+### 0.8.0
+
+- New product workspace in the DSH Web GUI: one main-panel console (entry in the global sidebar)
+  with Overview, Approvals, Payment tasks, Agents, Delegations, Governance, Audit and Settings.
+- Full operator flows on a local demo world: approve/deny with audit notes, create a payment task,
+  submit settlement, revoke a delegation, publish a draft policy, export and reset demo data.
+- Task detail reconstructs the authorizing chain, effective limits, audit events, reviews and
+  evidence; agent and case pages expose the full trail behind an exception.
+- The workspace is Chinese-first, theme-token based (light/dark) and ships inside the plugin bundle;
+  no extra process, port or service.
 
 ### 0.7.1
 

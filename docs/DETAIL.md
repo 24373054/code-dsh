@@ -10,6 +10,22 @@ a profile-owned data directory, runs deterministically offline and never moves f
 A sandbox mode uses an in-memory store for experiments and is explicitly non-authoritative: sandbox
 records never count as a trust decision. The plugin never sends money or settles value in either mode.
 
+## What's new in 0.8.0
+
+![Product workspace: overview](console-overview.png)
+
+- **Product workspace**: the plugin now adds a “Trust platform” entry to the DSH global sidebar.
+  It opens a full operations workspace with eight tabs: Overview, Approvals, Payment tasks, Agents,
+  Delegations, Governance, Audit and Settings.
+- **End-to-end operator flows on demo data**: approve or deny an escalated exception with an audit
+  note, create a payment task, submit settlement, revoke a delegation, publish a draft policy, and
+  export or reset the demo world. Data lives in the browser; no backend is required.
+- **Traceable context**: task detail reconstructs the authorizing chain and effective limits, audit
+  events, reviews and evidence; agent and case pages show the full trail behind an exception.
+- **Chinese-first and theme-aware**: the workspace uses the language of a finance operator and
+  follows the DSH light/dark theme tokens.
+- This phase is front-end only; productization and the real-engine / real-money phases follow.
+
 ## What's new in 0.7.0
 
 - **Tool catalog grows to 60 tools** in embedded/sandbox mode (61 with the intervention gate
@@ -39,6 +55,9 @@ records never count as a trust decision. The plugin never sends money or settles
 - An editable settings page in Settings → Trust Platform for the actor DID, the
   intervention-execution gate and the risk policy limits.
 - A data-management section with the storage card, JSON export and a guarded reset.
+- A product workspace (0.8.0) in the DSH global sidebar: an eight-tab main-panel console (Overview,
+  Approvals, Payment tasks, Agents, Delegations, Governance, Audit, Settings) with complete operator
+  flows on a local demo world.
 - Localized plugin metadata for the harness plugin manager: English and Chinese detail pages.
 
 ## Install

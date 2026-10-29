@@ -6,6 +6,8 @@
  * plugin. `apply` then joins the client context and publishes:
  *
  * - the `trust-platform` locale namespace (zh/en),
+ * - the product console: a global `main` panel (id `trust-platform`) opened
+ *   from its own `sidebar.panellist` entry,
  * - eight keyed `tool.call.toolview` renderers,
  * - a `plugins.detail.badge` tag and a `plugins.detail.section` overview panel,
  * - a read-only `settings.section` page for the DSH Settings dialog.
@@ -19,6 +21,11 @@ import { NS, en, zh } from './locales.js'
 import { TOOL_KEYS, ToolCard } from './toolviews.jsx'
 import { OverviewBadge, OverviewSection } from './overview.jsx'
 import { SettingsPanel } from './settings.jsx'
+import { TrustPlatformMain } from './product/app/main.jsx'
+import { TrustPlatformPanelIcon } from './product/app/panel-icon.jsx'
+
+/** Id shared by the sidebar entry and the main panel it opens. */
+export const PANEL_ID = 'trust-platform'
 
 /**
  * Cordis services this browser plugin injects: the slot registry it registers
@@ -71,4 +78,22 @@ export function apply(ctx) {
     locale: NS,
     inject: () => ({})
   }, SettingsPanel))
+
+  // The product console itself: one global main panel, opened from its own
+  // sidebar entry. This is a DSH surface, not a standalone page — the rail
+  // selects it like the built-in panels, and DSH owns the surrounding frame.
+  ctx.slots.inject('main', () => ctx.slots.register({
+    name: 'main',
+    key: PANEL_ID,
+    locale: NS,
+    inject: () => ({})
+  }, TrustPlatformMain))
+
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+    name: 'sidebar.panellist',
+    id: PANEL_ID,
+    order: 20,
+    label: () => translate(t, 'panel.label'),
+    locale: NS
+  }, TrustPlatformPanelIcon))
 }

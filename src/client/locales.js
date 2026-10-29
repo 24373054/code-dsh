@@ -70,6 +70,11 @@ export const en = Object.freeze({
   'overview.unavailable': 'The overview endpoint is unavailable in this host.',
 
   // Settings page (settings.section).
+  // Global main panel (sidebar entry) label.
+  'panel.label': 'Trust Platform',
+  'panel.desc': 'Operate your agent workforce',
+
+  // Settings page (settings.section).
   'settings.nav': 'Trust Platform',
   'settings.title': 'Trust Platform',
   'settings.mode': 'Mode',
@@ -231,6 +236,11 @@ export const zh = Object.freeze({
   'overview.error.host': '宿主错误 {code}：{message}',
   'overview.error.stale': '上次刷新失败：{message}',
   'overview.unavailable': '此宿主未提供概览接口。',
+
+  // 设置页（settings.section）。
+  // 全局主面板（侧边栏入口）名称。
+  'panel.label': '信任平台',
+  'panel.desc': '代理交易工作台',
 
   // 设置页（settings.section）。
   'settings.nav': '信任平台',
