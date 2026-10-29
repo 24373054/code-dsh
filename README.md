@@ -119,10 +119,10 @@ offline and without a browser.
 
 ## Product workspace (0.8.0)
 
-The 0.8.0 release adds the first product surface on top of the governed tools: a full **trust
-operations workspace** that runs as one DSH main panel. A global sidebar entry (信任平台 / Trust
-platform) opens it, and everything inside is rendered by the plugin — no separate web app, no extra
-port.
+The 0.8.0 release adds the first product surface on top of the governed tools: a **trust operations
+workspace** that docks into DSH’s right Sidebar from a shield button in the conversation header. The
+conversation stays in view beside it, DSH’s own column controls close it, and everything inside is
+rendered by the plugin — no separate web app, no extra port.
 
 ![信任平台产品工作台 · 总览](docs/console-overview.png)
 
@@ -184,10 +184,20 @@ export of the external-service adapter has been removed.
 
 ## Release notes
 
+### 0.8.1
+
+- The trust console is now a tab in DSH’s right Sidebar, opened from a shield button in the
+  conversation header; the chat stays visible beside it and the column’s own close control returns
+  to the conversation. No more full-frame takeover and no dead end.
+- Docked layout pass: compact top bar, fitting tab strip, single-column detail pages, responsive
+  tables, dialogs scoped to the column (Escape closes), popovers anchored inside the column, and
+  narrow-window reflow.
+- 159 offline tests green; the browser bundle is still built from source at pack time.
+
 ### 0.8.0
 
-- New product workspace in the DSH Web GUI: one main-panel console (entry in the global sidebar)
-  with Overview, Approvals, Payment tasks, Agents, Delegations, Governance, Audit and Settings.
+- New trust console with a full product workspace: Overview, Approvals, Payment tasks, Agents,
+  Delegations, Governance, Audit and Settings.
 - Full operator flows on a local demo world: approve/deny with audit notes, create a payment task,
   submit settlement, revoke a delegation, publish a draft policy, export and reset demo data.
 - Task detail reconstructs the authorizing chain, effective limits, audit events, reviews and

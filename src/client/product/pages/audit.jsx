@@ -334,7 +334,7 @@ export function AuditPage() {
           >
             {filteredCases.length ? (
               <div className="tp-table-wrap">
-                <table className="tp-table">
+                <table className="tp-table tp-audit-table">
                   <thead>
                     <tr>
                       <th>案件</th>

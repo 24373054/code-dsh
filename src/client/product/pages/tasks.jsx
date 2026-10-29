@@ -171,7 +171,7 @@ export function TasksPage() {
       <Card style={{ padding: 0 }}>
         {visible.length ? (
           <div className="tp-table-wrap">
-            <table className="tp-table">
+            <table className="tp-table tp-tasks-table">
               <thead>
                 <tr>
                   <th>付款任务</th>

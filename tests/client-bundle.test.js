@@ -177,6 +177,8 @@ function createClientContext() {
   const registrations = []
   const dictionaries = []
   const effects = []
+  const tabs = []
+  const openedTabs = []
   const context = {
     effect(callback, label) {
       effects.push(label)
@@ -193,6 +195,18 @@ function createClientContext() {
         return (key) => key
       }
     },
+    sidebarRightTabs: {
+      register(definition) {
+        tabs.push(definition)
+        return () => {}
+      }
+    },
+    sidebarRight: {
+      openTab(kind, options) {
+        openedTabs.push({ kind, options })
+        return 'tab'
+      }
+    },
     slots: {
       inject(slotName, callback) {
         const disposer = callback()
@@ -204,7 +218,7 @@ function createClientContext() {
       }
     }
   }
-  return { context, registrations, dictionaries, effects }
+  return { context, registrations, dictionaries, effects, tabs, openedTabs }
 }
 
 /** Replace the global fetch for one test and always restore it. */
@@ -274,7 +288,7 @@ test('the factory hands off apply and inject', () => {
   assert.equal(handoff.id, PLUGIN_ID)
   assert.equal(typeof exports.apply, 'function')
   assert.ok(Array.isArray(exports.inject))
-  assert.deepEqual(Array.from(exports.inject), ['slots', 'locale'])
+  assert.deepEqual(Array.from(exports.inject), ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight'])
   assert.ok(Object.keys(exports).includes('apply'))
   assert.ok(Object.keys(exports).includes('inject'))
 })
@@ -312,20 +326,57 @@ test('apply registers the plugin-manager overview entries', () => {
   assert.equal(badge.options.id, 'trust-platform-badge')
   assert.equal(badge.options.locale, NS)
 
-  const mainPanel = registrations.find((entry) => entry.options.name === "main")
-  assert.ok(mainPanel, "the product console must register as a main panel")
-  assert.equal(mainPanel.options.key, "trust-platform")
-  assert.equal(mainPanel.options.locale, NS)
-  assert.equal(typeof mainPanel.component, "function")
+  assert.equal(
+    registrations.some((entry) => entry.options.name === 'main'),
+    false,
+    'the console must not take over the centre conversation area'
+  )
+  assert.equal(
+    registrations.some((entry) => entry.options.name === 'sidebar.panellist'),
+    false,
+    'the console opens from the Session header, not the sidebar rail'
+  )
 
-  const railEntry = registrations.find((entry) => entry.options.name === "sidebar.panellist")
-  assert.ok(railEntry, "the console must have its own sidebar entry")
-  assert.equal(railEntry.options.id, "trust-platform")
-  assert.equal(railEntry.options.locale, NS)
-  assert.equal(railEntry.options.label(), en["panel.label"])
-  assert.equal(typeof railEntry.component, "function")
+  const consoleTab = registrations.find((entry) => entry.options.name === 'sidebar.right.pane.tab')
+  assert.ok(consoleTab, 'the console must register a docked right-column tab body')
+  assert.equal(consoleTab.options.key, PLUGIN_ID)
+  assert.equal(consoleTab.options.locale, NS)
+  assert.equal(typeof consoleTab.component, 'function')
+
+  const launcher = registrations.find((entry) => entry.options.name === 'conversation.session.header.utilities')
+  assert.ok(launcher, 'a Session-header entry must open the docked console')
+  assert.equal(launcher.options.id, 'trust-platform-console')
+  assert.equal(launcher.options.order, 20)
+  assert.equal(launcher.options.locale, NS)
+  assert.equal(typeof launcher.component, 'function')
 
   assert.equal(registrations.length, 13)
+})
+
+test('the docked console registers one right-column tab type', () => {
+  const { exports } = loadBundle()
+  const { context, tabs } = createClientContext()
+  exports.apply(context)
+
+  assert.equal(tabs.length, 1, 'exactly one sidebar-right tab type is registered')
+  const definition = tabs[0]
+  assert.equal(definition.id, PLUGIN_ID)
+  assert.equal(definition.kind, 'trust-console')
+  assert.equal(definition.priority, 'builtin')
+  assert.equal(definition.title(), en['panel.tab'])
+  assert.equal(definition.guide[0].description(), en['panel.guide'])
+})
+
+test('the Session-header launcher opens the docked console tab', () => {
+  const { exports } = loadBundle()
+  const { context, registrations, openedTabs } = createClientContext()
+  exports.apply(context)
+
+  const launcher = registrations.find((entry) => entry.options.name === 'conversation.session.header.utilities')
+  const injected = launcher.options.inject()
+  assert.equal(typeof injected.openConsole, 'function')
+  injected.openConsole()
+  assert.deepEqual(openedTabs, [{ kind: 'trust-console', options: undefined }])
 })
 
 test('apply registers the editable settings section', () => {

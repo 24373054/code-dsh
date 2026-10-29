@@ -4,6 +4,7 @@
  */
 import { useState } from 'react'
 import { useActions, useWorld } from '../hooks.js'
+import { PRODUCT_VERSION } from '../version.js'
 import { fmtDateTime, shortId } from '../ui/format.js'
 import { Icon } from '../ui/icons.jsx'
 import {
@@ -273,7 +274,7 @@ export function ProductSettingsPage() {
           <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span className="tp-strong" style={{ fontSize: 15 }}>{productName}</span>
-              <Tag tone="info">v0.8.0</Tag>
+              <Tag tone="info">v{PRODUCT_VERSION}</Tag>
               <Tag tone="neutral" dot>沙箱演示数据</Tag>
             </div>
             <div className="tp-muted" style={{ fontSize: 13, lineHeight: 1.7, marginTop: 6 }}>
@@ -284,7 +285,7 @@ export function ProductSettingsPage() {
         </div>
         <KV
           items={[
-            { k: '产品版本', v: 'v0.8.0' },
+            { k: '产品版本', v: `v${PRODUCT_VERSION}` },
             { k: '适用角色', v: '财务负责人 · 合规审计员' },
             { k: '运行环境', v: <Tag tone="neutral" dot>沙箱演示数据</Tag> },
             { k: '数据生成时间', v: world.seededAt ? fmtDateTime(world.seededAt) : '—' },

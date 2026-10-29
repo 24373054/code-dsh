@@ -12,11 +12,12 @@ records never count as a trust decision. The plugin never sends money or settles
 
 ## What's new in 0.8.0
 
-![Product workspace: overview](console-overview.png)
+![Docked trust console: overview](console-overview.png)
 
-- **Product workspace**: the plugin now adds a “Trust platform” entry to the DSH global sidebar.
-  It opens a full operations workspace with eight tabs: Overview, Approvals, Payment tasks, Agents,
-  Delegations, Governance, Audit and Settings.
+- **Docked trust console**: a shield button in the conversation header opens the console in DSH’s
+  right Sidebar, next to the chat. The conversation keeps running while the operator works, and the
+  column’s own close control returns to the full-width chat. It has eight tabs: Overview, Approvals,
+  Payment tasks, Agents, Delegations, Governance, Audit and Settings.
 - **End-to-end operator flows on demo data**: approve or deny an escalated exception with an audit
   note, create a payment task, submit settlement, revoke a delegation, publish a draft policy, and
   export or reset the demo world. Data lives in the browser; no backend is required.
@@ -55,9 +56,9 @@ records never count as a trust decision. The plugin never sends money or settles
 - An editable settings page in Settings → Trust Platform for the actor DID, the
   intervention-execution gate and the risk policy limits.
 - A data-management section with the storage card, JSON export and a guarded reset.
-- A product workspace (0.8.0) in the DSH global sidebar: an eight-tab main-panel console (Overview,
-  Approvals, Payment tasks, Agents, Delegations, Governance, Audit, Settings) with complete operator
-  flows on a local demo world.
+- A docked product console (0.8.0) in the conversation’s right Sidebar: an eight-tab workspace
+  (Overview, Approvals, Payment tasks, Agents, Delegations, Governance, Audit, Settings) with
+  complete operator flows on a local demo world; the chat stays visible beside it.
 - Localized plugin metadata for the harness plugin manager: English and Chinese detail pages.
 
 ## Install

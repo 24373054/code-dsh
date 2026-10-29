@@ -253,6 +253,12 @@ export function Drawer({ open, onClose, title, subtitle, children, footer, width
  * @param {{open: boolean, onClose: () => void, title: any, children?: any, footer?: any}} props
  */
 export function Modal({ open, onClose, title, children, footer }) {
+  useEffect(() => {
+    if (!open) return undefined
+    const handleKeyDown = (event) => { if (event.key === 'Escape') onClose?.() }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [open, onClose])
   if (!open) return null
   return (
     <div className="tp-modal-mask" onClick={onClose} role="presentation">

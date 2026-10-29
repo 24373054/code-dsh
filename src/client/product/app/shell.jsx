@@ -1,7 +1,7 @@
 /**
  * Frame and top-level navigation of the trust-platform console.
  *
- * The console is one DSH main panel: the shell renders the operator's workspace
+ * The console docks into DSH's right Sidebar: the shell renders the operator's workspace
  * header (organization, search, notifications, account) plus the product tabs.
  * Pages own their own content and use `useNavigation()` for drill-downs.
  */

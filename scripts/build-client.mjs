@@ -20,6 +20,9 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const ENTRY = resolve(ROOT, 'src/client/index.jsx')
 const OUTFILE = resolve(ROOT, 'lib/client.js')
 const PLUGIN_ID = '@sealwax/dsh-trust-platform'
+const PACKAGE_VERSION = JSON.parse(
+  await (await import('node:fs/promises')).readFile(resolve(ROOT, 'package.json'), 'utf8')
+).version
 
 /**
  * Module requests the shell seeds into every plugin's loader. Anything not in
@@ -54,6 +57,7 @@ const result = await build({
   target: 'es2022',
   jsx: 'automatic',
   external: BASELINE,
+  define: { __PLUGIN_VERSION__: JSON.stringify(PACKAGE_VERSION) },
   write: false,
   logLevel: 'silent',
   sourcemap: false,

@@ -70,9 +70,13 @@ export const en = Object.freeze({
   'overview.unavailable': 'The overview endpoint is unavailable in this host.',
 
   // Settings page (settings.section).
-  // Global main panel (sidebar entry) label.
+  // Docked right-column console tab and Session-header launcher labels.
   'panel.label': 'Trust Platform',
   'panel.desc': 'Operate your agent workforce',
+  // Docked console tab and its Session-header launcher.
+  'panel.tab': 'Trust Platform',
+  'panel.open': 'Open Trust Platform',
+  'panel.guide': 'Agent payment workspace docked beside the chat',
 
   // Settings page (settings.section).
   'settings.nav': 'Trust Platform',
@@ -238,9 +242,13 @@ export const zh = Object.freeze({
   'overview.unavailable': '此宿主未提供概览接口。',
 
   // 设置页（settings.section）。
-  // 全局主面板（侧边栏入口）名称。
+  // 停靠式控制台标签页与对话页签入口按钮文案。
   'panel.label': '信任平台',
   'panel.desc': '代理交易工作台',
+  // Dock 控制台标签页与对话页签入口按钮。
+  'panel.tab': '信任平台',
+  'panel.open': '打开信任平台',
+  'panel.guide': '固定在对话右侧的代理交易工作台',
 
   // 设置页（settings.section）。
   'settings.nav': '信任平台',

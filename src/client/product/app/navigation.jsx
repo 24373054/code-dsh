@@ -1,7 +1,7 @@
 /**
  * In-panel navigation for the trust-platform console.
  *
- * The console is one DSH main panel, so it owns its own page stack without
+ * The console is a docked right-column surface, so it owns its page stack without
  * touching the DSH address bar. Pages are plain strings plus optional params
  * (a task id, an agent id); `back()` pops the stack.
  */

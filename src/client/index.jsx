@@ -6,32 +6,35 @@
  * plugin. `apply` then joins the client context and publishes:
  *
  * - the `trust-platform` locale namespace (zh/en),
- * - the product console: a global `main` panel (id `trust-platform`) opened
- *   from its own `sidebar.panellist` entry,
+ * - the product console: a docked right-Sidebar tab (`trust-console`) that
+ *   opens beside the conversation from a Session-header control, so the chat
+ *   stays on screen and DSH's own column controls close it again,
  * - eight keyed `tool.call.toolview` renderers,
  * - a `plugins.detail.badge` tag and a `plugins.detail.section` overview panel,
  * - a read-only `settings.section` page for the DSH Settings dialog.
  *
- * No other service is injected: the browser half only reads the two client
- * services declared here, and its network access is limited to the same-origin
- * overview GET mounted with the panels.
+ * The browser half injects the slot/locale registries and the right-Sidebar
+ * tab registry and navigation face; its network access is limited to the
+ * same-origin overview GET mounted with the panels.
  */
 import { translate } from './format.js'
 import { NS, en, zh } from './locales.js'
 import { TOOL_KEYS, ToolCard } from './toolviews.jsx'
 import { OverviewBadge, OverviewSection } from './overview.jsx'
 import { SettingsPanel } from './settings.jsx'
-import { TrustPlatformMain } from './product/app/main.jsx'
-import { TrustPlatformPanelIcon } from './product/app/panel-icon.jsx'
+import { TrustPlatformPanel } from './product/app/panel.jsx'
+import { TrustConsoleLauncher } from './product/app/launcher.jsx'
+import { TRUST_CONSOLE_ID, TRUST_CONSOLE_KIND, trustConsoleDefinition } from './product/app/tab-type.js'
 
-/** Id shared by the sidebar entry and the main panel it opens. */
+/** Id shared by the console tab type and the Session-header launcher. */
 export const PANEL_ID = 'trust-platform'
 
 /**
  * Cordis services this browser plugin injects: the slot registry it registers
- * into and the locale registry its copy lives in.
+ * into, the locale registry its copy lives in, and the right-Sidebar tab
+ * registry and navigation face the console docks into.
  */
-export const inject = ['slots', 'locale']
+export const inject = ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight']
 
 /**
  * Client plugin body.
@@ -79,21 +82,29 @@ export function apply(ctx) {
     inject: () => ({})
   }, SettingsPanel))
 
-  // The product console itself: one global main panel, opened from its own
-  // sidebar entry. This is a DSH surface, not a standalone page — the rail
-  // selects it like the built-in panels, and DSH owns the surrounding frame.
-  ctx.slots.inject('main', () => ctx.slots.register({
-    name: 'main',
-    key: PANEL_ID,
+  // The product console: one docked right-Sidebar tab type, its body in the
+  // keyed seat, and a Session-header control that opens it beside the chat.
+  // The conversation is never replaced — the operator keeps both surfaces on
+  // screen, and the right column's own collapse/close controls dismiss it.
+  ctx.effect(
+    () => ctx.sidebarRightTabs.register(trustConsoleDefinition(t)),
+    'trust-platform: console tab type'
+  )
+
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+    name: 'sidebar.right.pane.tab',
+    key: TRUST_CONSOLE_ID,
     locale: NS,
     inject: () => ({})
-  }, TrustPlatformMain))
+  }, TrustPlatformPanel)), 'trust-platform: console tab body')
 
-  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
-    name: 'sidebar.panellist',
-    id: PANEL_ID,
+  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+    name: 'conversation.session.header.utilities',
+    id: 'trust-platform-console',
     order: 20,
-    label: () => translate(t, 'panel.label'),
-    locale: NS
-  }, TrustPlatformPanelIcon))
+    locale: NS,
+    inject: () => ({
+      openConsole: () => ctx.sidebarRight.openTab(TRUST_CONSOLE_KIND)
+    })
+  }, TrustConsoleLauncher))
 }
